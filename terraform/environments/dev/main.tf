@@ -1,6 +1,6 @@
 locals {
   shared_env_vars = {
-    "SECRET_KEY"                                 = var.secret_key
+    "SECRET_KEY"                                 = data.google_secret_manager_secret_version.secret_key.secret_data
     "LOG_LEVEL"                                  = "INFO"
     "CONSOLE_WEB_URL"                            = ""
     "CONSOLE_API_URL"                            = ""
@@ -14,7 +14,7 @@ locals {
     "WEB_API_CORS_ALLOW_ORIGINS"                 = "*"
     "CONSOLE_CORS_ALLOW_ORIGINS"                 = "*"
     "DB_USERNAME"                                = var.db_username
-    "DB_PASSWORD"                                = var.db_password
+    "DB_PASSWORD"                                = data.google_secret_manager_secret_version.db_password.secret_data
     "DB_HOST"                                    = module.cloudsql.cloudsql_internal_ip
     "DB_PORT"                                    = var.db_port
     "STORAGE_TYPE"                               = var.storage_type
@@ -26,14 +26,63 @@ locals {
     "PGVECTOR_HOST"                              = module.cloudsql.cloudsql_internal_ip
     "PGVECTOR_PORT"                              = "5432"
     "PGVECTOR_USER"                              = var.db_username
-    "PGVECTOR_PASSWORD"                          = var.db_password
+    "PGVECTOR_PASSWORD"                          = data.google_secret_manager_secret_version.db_password.secret_data
     "PGVECTOR_DATABASE"                          = var.db_database
     "CODE_EXECUTION_ENDPOINT"                    = module.cloudrun.dify_sandbox_url
     "CODE_EXECUTION_API_KEY"                     = "dify-sandbox"
     "INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH"    = var.indexing_max_segmentation_tokens_length
-    "PLUGIN_DAEMON_KEY"                          = var.plugin_daemon_key
-    "PLUGIN_DIFY_INNER_API_KEY"                  = var.plugin_dify_inner_api_key
+    "PLUGIN_DAEMON_KEY"                          = data.google_secret_manager_secret_version.plugin_daemon_key.secret_data
+    "PLUGIN_DIFY_INNER_API_KEY"                  = data.google_secret_manager_secret_version.plugin_dify_inner_api_key.secret_data
+    "CODE_MAX_DEPTH"                             = "10"
+    "CODE_MAX_STRING_ARRAY_LENGTH"               = "500"
+    "CODE_MAX_OBJECT_ARRAY_LENGTH"               = "500"
+    "CODE_EXECUTION_TIMEOUT"                     = "10"
+    "WORKFLOW_MAX_EXECUTION_STEPS"               = "1000"
+    "WORKFLOW_MAX_EXECUTION_TIME"                = "3000"
+    "APP_MAX_EXECUTION_TIME"                     = "3000"
+    "AWS_REGION"                                 = "ap-northeast-2"
+    "AWS_ACCESS_KEY_ID"                          = data.google_secret_manager_secret_version.aws_access_key_id.secret_data
+    "AWS_SECRET_ACCESS_KEY"                      = data.google_secret_manager_secret_version.aws_secret_access_key.secret_data
   }
+}
+
+data "google_secret_manager_secret_version" "aws_access_key_id" {
+  project = var.project_id
+  secret  = var.aws_access_key_id_secret_name
+}
+
+data "google_secret_manager_secret_version" "aws_secret_access_key" {
+  project = var.project_id
+  secret  = var.aws_secret_access_key_secret_name
+}
+
+data "google_secret_manager_secret_version" "secret_key" {
+  project = var.project_id
+  secret  = var.secret_key_secret_name
+}
+
+data "google_secret_manager_secret_version" "db_password" {
+  project = var.project_id
+  secret  = var.db_password_secret_name
+}
+
+data "google_secret_manager_secret_version" "plugin_daemon_key" {
+  project = var.project_id
+  secret  = var.plugin_daemon_key_secret_name
+}
+
+data "google_secret_manager_secret_version" "plugin_dify_inner_api_key" {
+  project = var.project_id
+  secret  = var.plugin_dify_inner_api_key_secret_name
+}
+
+data "google_compute_network" "default" {
+  name = "default"
+}
+
+data "google_compute_subnetwork" "default" {
+  name   = "default"
+  region = var.region
 }
 
 module "cloudrun" {
@@ -48,11 +97,11 @@ module "cloudrun" {
   web_repository_id           = var.web_repository_id
   api_repository_id           = var.api_repository_id
   sandbox_repository_id       = var.sandbox_repository_id
-  vpc_network_name            = module.network.vpc_network_name
-  vpc_subnet_name             = module.network.vpc_subnet_name
+  vpc_network_name            = data.google_compute_network.default.name
+  vpc_subnet_name             = data.google_compute_subnetwork.default.name
   plugin_daemon_repository_id = var.plugin_daemon_repository_id
-  plugin_daemon_key           = var.plugin_daemon_key
-  plugin_dify_inner_api_key   = var.plugin_dify_inner_api_key
+  plugin_daemon_key           = data.google_secret_manager_secret_version.plugin_daemon_key.secret_data
+  plugin_dify_inner_api_key   = data.google_secret_manager_secret_version.plugin_dify_inner_api_key.secret_data
   dify_plugin_daemon_version  = var.dify_plugin_daemon_version
   db_database                 = var.db_database
   db_database_plugin          = var.db_database_plugin
@@ -61,6 +110,8 @@ module "cloudrun" {
   shared_env_vars             = local.shared_env_vars
   min_instance_count          = var.min_instance_count
   max_instance_count          = var.max_instance_count
+  slack_webhook_secret_name   = var.slack_webhook_secret_name
+  slack_channel_name          = var.slack_channel_name
 
   depends_on = [google_project_service.enabled_services]
 }
@@ -71,10 +122,10 @@ module "cloudsql" {
   project_id          = var.project_id
   region              = var.region
   db_username         = var.db_username
-  db_password         = var.db_password
+  db_password         = data.google_secret_manager_secret_version.db_password.secret_data
   deletion_protection = var.db_deletion_protection
 
-  vpc_network_name = module.network.vpc_network_name
+  vpc_network_name = data.google_compute_network.default.name
 
   depends_on = [google_project_service.enabled_services]
 }
@@ -85,16 +136,7 @@ module "redis" {
   project_id = var.project_id
   region     = var.region
 
-  vpc_network_name = module.network.vpc_network_name
-
-  depends_on = [google_project_service.enabled_services]
-}
-
-module "network" {
-  source = "../../modules/network"
-
-  project_id = var.project_id
-  region     = var.region
+  vpc_network_name = data.google_compute_network.default.name
 
   depends_on = [google_project_service.enabled_services]
 }
@@ -114,7 +156,7 @@ module "filestore" {
 
   region = var.region
 
-  vpc_network_name = module.network.vpc_network_name
+  vpc_network_name = data.google_compute_network.default.name
 
   depends_on = [google_project_service.enabled_services]
 }

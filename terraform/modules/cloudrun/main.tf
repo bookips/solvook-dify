@@ -438,3 +438,398 @@ resource "google_cloud_run_v2_service" "dify_sandbox" {
     }
   }
 }
+data "google_secret_manager_secret_version" "slack_webhook" {
+  project = var.project_id
+  secret  = var.slack_webhook_secret_name
+}
+
+resource "google_monitoring_notification_channel" "slack" {
+  display_name = "Slack"
+  type         = "slack"
+  labels = {
+    channel_name = var.slack_channel_name
+  }
+  sensitive_labels {
+    auth_token = data.google_secret_manager_secret_version.slack_webhook.secret_data
+  }
+}
+
+resource "google_monitoring_alert_policy" "dify_service_5xx_errors" {
+  display_name = "Dify Service - High 5xx Error Rate"
+  combiner     = "OR"
+  notification_channels = [
+    google_monitoring_notification_channel.slack.name
+  ]
+  conditions {
+    display_name = "High 5xx Error Rate"
+    condition_threshold {
+      filter     = "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"${google_cloud_run_v2_service.dify_service.name}\" metric.label.\"response_code_class\"=\"5xx\""
+      duration   = "300s"
+      comparison = "COMPARISON_GT"
+      threshold_value = 5
+      trigger {
+        count = 1
+      }
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_RATE"
+      }
+    }
+  }
+}
+
+resource "google_monitoring_dashboard" "dify_dashboard" {
+  project        = var.project_id
+  dashboard_json = jsonencode({
+    "displayName" : "Dify Application Dashboard",
+    "gridLayout" : {
+      "columns" : "2",
+      "widgets" : [
+        {
+          "title" : "Request Count",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_RATE"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Request Count",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Request Latency",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/request_latencies\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_99"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Latency (ms)",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "5xx Errors",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\" metric.label.response_code_class=\"5xx\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_RATE"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "5xx Errors",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Container CPU Utilization",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/cpu/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_99",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p99"
+              },
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/cpu/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_95",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p95"
+              },
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/cpu/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_50",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p50"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "CPU Utilization",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Container Memory Utilization",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/memory/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_99",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_99",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p99"
+              },
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/memory/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_95",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p95"
+              },
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/memory/utilizations\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "alignmentPeriod" : "60s",
+                      "perSeriesAligner" : "ALIGN_PERCENTILE_50",
+                      "crossSeriesReducer": "REDUCE_PERCENTILE_50",
+                      "groupByFields": ["resource.label.service_name"]
+                    }
+                  }
+                },
+                "plotType" : "LINE",
+                "legendTemplate": "p50"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Memory Utilization",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Instance Count",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"run.googleapis.com/container/instance_count\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Instance Count",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "PostgreSQL - CPU Utilization",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"cloudsql.googleapis.com/database/cpu/utilization\" resource.type=\"cloudsql_database\" resource.label.database_id=\"${var.project_id}:postgres-instance\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "CPU Utilization",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "PostgreSQL - Memory Utilization",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"cloudsql.googleapis.com/database/memory/utilization\" resource.type=\"cloudsql_database\" resource.label.database_id=\"${var.project_id}:postgres-instance\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Memory Utilization",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "PostgreSQL - Active Connections",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"cloudsql.googleapis.com/database/postgresql/num_backends\" resource.type=\"cloudsql_database\" resource.label.database_id=\"${var.project_id}:postgres-instance\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Active Connections",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Redis - CPU Utilization",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"redis.googleapis.com/stats/cpu_utilization\" resource.type=\"redis_instance\" resource.label.instance_id=\"projects/${var.project_id}/locations/${var.region}/instances/dify-redis\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "CPU Utilization",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Redis - Memory Usage Ratio",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"redis.googleapis.com/stats/memory/usage_ratio\" resource.type=\"redis_instance\" resource.label.instance_id=\"projects/${var.project_id}/locations/${var.region}/instances/dify-redis\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Memory Usage Ratio",
+              "scale" : "LINEAR"
+            }
+          }
+        },
+        {
+          "title" : "Redis - Connected Clients",
+          "xyChart" : {
+            "dataSets" : [
+              {
+                "timeSeriesQuery" : {
+                  "timeSeriesFilter" : {
+                    "filter" : "metric.type=\"redis.googleapis.com/clients/connected\" resource.type=\"redis_instance\" resource.label.instance_id=\"projects/${var.project_id}/locations/${var.region}/instances/dify-redis\"",
+                    "aggregation" : {
+                      "perSeriesAligner" : "ALIGN_MEAN"
+                    }
+                  }
+                },
+                "plotType" : "LINE"
+              }
+            ],
+            "timeshiftDuration" : "0s",
+            "yAxis" : {
+              "label" : "Connected Clients",
+              "scale" : "LINEAR"
+            }
+          }
+        }
+      ]
+    }
+  })
+}

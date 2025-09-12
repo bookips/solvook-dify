@@ -17,7 +17,7 @@ resource "google_compute_global_address" "private_ip_range" {
 
 resource "google_sql_database_instance" "postgres_instance" {
   depends_on          = [google_service_networking_connection.private_vpc_connection]
-  database_version    = "POSTGRES_15"
+  database_version    = "POSTGRES_17"
   name                = "postgres-instance"
   project             = var.project_id
   region              = var.region
@@ -60,7 +60,13 @@ resource "google_sql_database_instance" "postgres_instance" {
     }
 
     pricing_plan = "PER_USE"
-    tier         = "db-custom-2-8192"
+    tier         = "db-f1-micro"
+    edition      = "ENTERPRISE"
+
+    database_flags {
+      name  = "max_connections"
+      value = "500"
+    }
   }
 }
 
