@@ -192,3 +192,46 @@ resource "google_project_service" "enabled_services" {
   project  = var.project_id
   service  = each.value
 }
+
+# --- Dify Data Processor ---
+# This service account will be used to run the Cloud Functions.
+# It needs permissions for Firestore, Cloud Tasks, Secret Manager, and Google Sheets.
+resource "google_service_account" "dify_batch_processor_sa" {
+  project      = var.project_id
+  account_id   = "dify-batch-processor-sa"
+  display_name = "Dify Batch Processor Service Account"
+}
+
+# Grant necessary roles to the service account.
+resource "google_project_iam_member" "dify_batch_processor_sa_roles" {
+  for_each = toset([
+    "roles/datastore.user",
+    "roles/cloudtasks.enqueuer",
+    "roles/secretmanager.secretAccessor",
+    "roles/run.invoker" # Needed for Cloud Tasks to invoke the worker
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.dify_batch_processor_sa.email}"
+}
+
+
+module "dify_batch_processor" {
+  source = "../../modules/dify_batch_processor"
+
+  project_id                          = var.project_id
+  location                            = var.region
+  spreadsheet_id                      = var.spreadsheet_id
+  sheet_name                          = var.sheet_name
+  unique_id_column                    = var.unique_id_column
+  dify_api_endpoint                   = var.dify_api_endpoint
+  dify_api_key_secret_id              = var.dify_api_key_secret_id
+  dify_api_timeout_minutes            = var.dify_api_timeout_minutes
+  google_sheets_credentials_secret_id = var.google_sheets_credentials_secret_id
+  function_service_account_email      = google_service_account.dify_batch_processor_sa.email
+
+  depends_on = [
+    google_project_service.enabled_services,
+    google_project_iam_member.dify_batch_processor_sa_roles
+  ]
+}

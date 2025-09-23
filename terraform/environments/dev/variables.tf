@@ -131,3 +131,42 @@ variable "slack_webhook_secret_name" {
 variable "slack_channel_name" {
   type = string
 }
+
+# --- Dify Batch Processor Variables ---
+
+variable "spreadsheet_id" {
+  description = "The ID of the Google Sheet to process."
+  type        = string
+}
+
+variable "sheet_name" {
+  description = "The name of the sheet within the spreadsheet."
+  type        = string
+}
+
+variable "unique_id_column" {
+  description = "The column index (0-based) or 'ROW_NUMBER' to use as a unique ID."
+  type        = string
+  default     = "0"
+}
+
+variable "dify_api_endpoint" {
+  description = "The endpoint URL for the self-hosted Dify workflow API."
+  type        = string
+}
+
+variable "dify_api_key_secret_id" {
+  description = "The ID of the Secret Manager secret containing the Dify API key."
+  type        = string
+}
+
+variable "dify_api_timeout_minutes" {
+  description = "The timeout in minutes for the Dify API call in the worker function."
+  type        = number
+  default     = 5
+}
+
+variable "google_sheets_credentials_secret_id" {
+  description = "The ID of the Secret Manager secret containing the Google Sheets service account credentials."
+  type        = string
+}
