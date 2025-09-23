@@ -1,0 +1,8 @@
+# Google Cloud
+google-cloud-firestore
+google-cloud-tasks
+
+# Google API
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

@@ -1,0 +1,23 @@
+[project]
+name = "dify-batch-processor"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "jun-jplee",email = "jp@bookips.com.com"}
+]
+readme = "README.md"
+requires-python = "^3.13"
+dependencies = [
+    "google-cloud-firestore (>=2.21.0,<3.0.0)",
+    "google-cloud-tasks (>=2.19.3,<3.0.0)",
+    "google-api-python-client (>=2.182.0,<3.0.0)",
+    "google-auth-httplib2 (>=0.2.0,<0.3.0)",
+    "google-auth-oauthlib (>=1.2.2,<2.0.0)",
+    "requests (>=2.32.5,<3.0.0)",
+    "functions-framework (>=3.9.2,<4.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,5 @@
+# Google Cloud
+google-cloud-firestore
+
+# HTTP Requests
+requests
