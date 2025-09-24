@@ -4,33 +4,83 @@ import os
 import functions_framework
 from google.cloud import firestore, tasks_v2
 from google.oauth2 import service_account
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from config import Config
 
-# --- Clients ---
 db = firestore.Client()
 tasks_client = tasks_v2.CloudTasksClient()
 
-# Configure logging at the module level
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# --- Google Sheets API Setup ---
-# This function assumes you have stored the service account JSON in Secret Manager.
-# You need to grant the Cloud Function's service account access to this secret.
+
+def stream_structured_sheet_data(
+    sheet_service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    header_row: int = 1,
+    chunk_size: int = 1000,
+    filter_column_name: str | None = None,
+    filter_column_value: str | None = None
+):
+    """
+    Reads data from Google Sheets in chunks and yields each row as a generator,
+    avoiding loading the entire sheet into memory.
+    """
+    try:
+        header_range = f"{sheet_name}!A{header_row}:Z{header_row}"
+        header_result = sheet_service.values().get(spreadsheetId=spreadsheet_id, range=header_range).execute()
+        header = header_result.get('values', [[]])[0]
+
+        if not header:
+            logging.warning("Sheet header is empty. Cannot process.")
+            return
+
+        current_row_index = header_row + 1
+        while True:
+            data_range = f"{sheet_name}!A{current_row_index}:Z{current_row_index + chunk_size - 1}"
+            result = sheet_service.values().get(spreadsheetId=spreadsheet_id, range=data_range).execute()
+            rows = result.get('values', [])
+
+            if not rows:
+                break
+
+            for i, row in enumerate(rows):
+                row_number = current_row_index + i
+                structured_row = []
+                padded_row = row + [''] * (len(header) - len(row))
+                for j, cell_value in enumerate(padded_row):
+                    if j < len(header):
+                        column_name = header[j]
+                        if column_name:
+                            structured_row.append({column_name: cell_value})
+
+                if filter_column_name and filter_column_value:
+                    cell_value = find_data_by_name(structured_row, filter_column_name)
+                    if cell_value != filter_column_value:
+                        continue
+
+                yield row_number, structured_row
+
+            if len(rows) < chunk_size:
+                break
+
+            current_row_index += chunk_size
+
+    except Exception as e:
+        logging.error(f"Error streaming sheet data: {e}", exc_info=True)
+
+
+def find_data_by_name(structured_row: list[dict], name: str) -> str | None:
+    """Finds and returns the value associated with a given name in a structured row."""
+    for item in structured_row:
+        if name in item:
+            return item.get(name)
+    return None
+
+
 def get_sheets_service():
     """Builds and returns a Google Sheets API service object."""
-    # TODO: Secret Manager에서 서비스 계정 키를 가져오는 로직을 구현해야 합니다.
-    # 예시:
-    # from google.cloud import secretmanager
-    # client = secretmanager.SecretManagerServiceClient()
-    # name = f"projects/{Config.PROJECT_ID}/secrets/YOUR_SECRET_ID/versions/latest"
-    # response = client.access_secret_version(request={"name": name})
-    # creds_json = response.payload.data.decode("UTF-8")
-    # creds_info = json.loads(creds_json)
-    # creds = service_account.Credentials.from_service_account_info(creds_info)
-    
     if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         creds = service_account.Credentials.from_service_account_file(
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
@@ -39,14 +89,81 @@ def get_sheets_service():
     else:
         from google.cloud import secretmanager
         client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{Config.PROJECT_ID}/secrets/YOUR_SECRET_ID/versions/latest"
+        name = f"projects/{Config.PROJECT_ID}/secrets/{Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID}/versions/latest"
         response = client.access_secret_version(request={"name": name})
         creds_json = response.payload.data.decode("UTF-8")
-        creds_info = json.loads(creds_json) 
+        creds_info = json.loads(creds_json)
         creds = service_account.Credentials.from_service_account_info(creds_info)
 
     service = build('sheets', 'v4', credentials=creds)
     return service
+
+
+def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = True) -> dict:
+    """Constructs the payload to send to the Dify API."""
+    match category:
+        case "본문분석":
+            return {
+                "passage": find_data_by_name(data, "passage"),
+                "interpretation": find_data_by_name(data, "interpretation"),
+                "passageGroupId": find_data_by_name(data, "passageGroupId"),
+                "env": find_data_by_name(data, "env")
+            }
+        case "워크북":
+            return {
+                "passageId": find_data_by_name(data, "passageId"),
+                "passage": find_data_by_name(data, "passage"),
+                "interpretation": find_data_by_name(data, "interpretation"),
+                "passageGroupId": find_data_by_name(data, "passageGroupId"),
+                "env": find_data_by_name(data, "env"),
+                "isNew": isNew
+            }
+
+
+def create_unique_id_by_category(data: list[dict], category: str) -> str:
+    """Creates a unique task ID based on the category and a unique identifier from the data."""
+    workflow_id = Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(category)
+    passage_group_id = find_data_by_name(data, "passageGroupId")
+    match category:
+        case "본문분석":
+            return f"{workflow_id}/{passage_group_id}"
+        case "워크북":
+            passage_id = find_data_by_name(data, "passageId")
+            return f"{workflow_id}/{passage_group_id}/{passage_id}"
+
+
+def get_task_status(task_id: str, is_pattern_search: bool = False) -> str | None:
+    """
+    Retrieves the status of a task from Firestore.
+    Can perform an exact match or a pattern-based search.
+
+    Args:
+        task_id: The document ID or ID pattern to search for.
+        is_pattern_search: If True, performs a 'starts with' search. 
+                           If any matching doc is 'SUCCESS', returns 'SUCCESS'.
+                           If False, performs an exact match for the given task_id.
+
+    Returns:
+        The status string ('SUCCESS', 'PENDING', etc.) or None if not found.
+    """
+    collection_ref = db.collection(Config.FIRESTORE_COLLECTION)
+    
+    if is_pattern_search:
+        end_pattern = task_id[:-1] + chr(ord(task_id[-1]) + 1)
+        query = collection_ref.where(firestore.FieldPath.document_id(), ">=", task_id) \
+                              .where(firestore.FieldPath.document_id(), "<", end_pattern)
+        
+        for doc in query.stream():
+            if doc.to_dict().get('status') == 'SUCCESS':
+                return 'SUCCESS'
+        return None
+    else:
+        doc_ref = collection_ref.document(task_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return doc.to_dict().get('status')
+        return None
+
 
 @functions_framework.http
 def main(request: dict):
@@ -56,47 +173,53 @@ def main(request: dict):
     and creates tasks in Cloud Tasks for processing.
     """
     try:
-        # 1. Get data from Google Sheets
         service = get_sheets_service()
-        sheet = service.spreadsheets()
-        data_range = f"{Config.SHEET_NAME}!A2:Z"
-        result = sheet.values().get(spreadsheetId=Config.SPREADSHEET_ID, range=data_range).execute()
-        rows = result.get('values', [])
+        data_stream = stream_structured_sheet_data(
+            sheet_service=service,
+            spreadsheet_id=Config.SPREADSHEET_ID,
+            sheet_name=Config.SHEET_NAME,
+            filter_column_name="target",
+            filter_column_value="TRUE"
+        )
 
-        if not rows:
-            logging.info("No data found in Google Sheets.")
-            return "No data found in Google Sheets.", 200
-
-        # 2. Get status from Firestore
-        docs_ref = db.collection(Config.FIRESTORE_COLLECTION).stream()
-        processed_ids = {doc.id: doc.to_dict().get('status') for doc in docs_ref}
-
-        # 3. Filter data and create tasks
         tasks_created_count = 0
-        for i, row in enumerate(rows):
-            if not row: continue # Skip empty rows
+        processed_rows = 0
+        for row_number, structured_row in data_stream:
+            processed_rows += 1
+            if not structured_row: continue
 
-            # Determine the unique ID
-            if Config.UNIQUE_ID_COLUMN.upper() == 'ROW_NUMBER':
-                unique_id = str(i + 2) # Row numbers start from 2 in this range
-            else:
-                try:
-                    unique_id = row[int(Config.UNIQUE_ID_COLUMN)]
-                except (IndexError, ValueError):
-                    logging.warning(f"Could not determine unique ID for row {i+2}. Skipping.")
-                    continue
-            
-            status = processed_ids.get(unique_id)
+            category = find_data_by_name(structured_row, "content_category")
+            if not category:
+                logging.warning(f"Row {row_number} missing 'content_category'. Skipping.")
+                continue
 
-            # Process only if status is not 'SUCCESS'
-            if status != 'SUCCESS':
-                create_cloud_task(row, unique_id)
-                tasks_created_count += 1
-                # Update Firestore status to 'PENDING'
-                db.collection(Config.FIRESTORE_COLLECTION).document(unique_id).set({
-                    'status': 'PENDING',
-                    'timestamp': firestore.SERVER_TIMESTAMP
-                }, merge=True)
+            for each in category.split(","):
+                each = each.strip()
+                unique_id = create_unique_id_by_category(structured_row, each)
+
+                # Use pattern search to see if any previous attempt for this pattern was successful.
+                status = get_task_status(unique_id, is_pattern_search=(each=="워크북"))
+                
+                isNew = each == "워크북" and status == "SUCCESS" 
+                input_data = to_dify_inputs_by_category(structured_row, each, isNew)
+
+                if status != 'SUCCESS' or isNew:
+                    # Always create a new, unique ID with a timestamp for the actual task.
+                    unique_task_id = f"{unique_id}/{int(firestore.SERVER_TIMESTAMP.now().timestamp())}"
+                    
+                    create_cloud_task(input_data, unique_task_id)
+                    tasks_created_count += 1
+
+                    # Update state by unique_id to 'PENDING' if not already 'SUCCESS'
+                    doc_ref = db.collection(Config.FIRESTORE_COLLECTION).document(unique_id)
+                    doc_ref.set({
+                        'status': 'PENDING',
+                        'timestamp': firestore.SERVER_TIMESTAMP
+                    }, merge=True)
+
+        if processed_rows == 0:
+            logging.info("No data found in Google Sheets that matches the filter.")
+            return "No data found in Google Sheets.", 200
 
         logging.info(f"Successfully created {tasks_created_count} tasks.")
         return f"Created {tasks_created_count} tasks.", 200
@@ -105,11 +228,10 @@ def main(request: dict):
         logging.error(f"An error occurred: {e}", exc_info=True)
         return "Internal Server Error", 500
 
-def create_cloud_task(row_data: dict, unique_id: str):
+
+def create_cloud_task(input_data: dict, task_id: str):
     """Creates a task in Cloud Tasks."""
     parent = tasks_client.queue_path(Config.PROJECT_ID, Config.LOCATION, Config.QUEUE_NAME)
-
-    # Construct the HTTP request for the worker.
     task = {
         "http_request": {
             "http_method": tasks_v2.HttpMethod.POST,
@@ -117,25 +239,21 @@ def create_cloud_task(row_data: dict, unique_id: str):
             "headers": {"Content-type": "application/json"},
         }
     }
-
-    # The payload to send to the worker function.
+    splitted = task_id.split('/')
+    workflow_id, unique_id = splitted[0], '/'.join(splitted[:-1]) # unique_id without timestamp
     payload = {
         "unique_id": unique_id,
-        "data": row_data,
-        "endpoint": "",
+        "data": input_data,
+        "endpoint": f"{Config.DIFY_API_ENDPOINT}/workflows/{workflow_id}/run",
     }
-    
-    # Add the payload to the request.
-    task["http_request"]["body"] = json.dumps(payload).encode()
 
-    # Use the unique ID to prevent duplicate tasks if the loader is re-run.
-    task["name"] = f"{parent}/tasks/{unique_id}-{int(firestore.SERVER_TIMESTAMP.now().timestamp())}"
+    task["http_request"]["body"] = json.dumps(payload).encode()
+    task["name"] = f"{parent}/tasks/{task_id}"
 
     try:
         response = tasks_client.create_task(request={"parent": parent, "task": task})
-        logging.info(f"Created task: {response.name}")
+        logging.info(f"Created task: {response.name} on dify workflow {workflow_id}")
     except Exception as e:
-        # Handle potential task duplication error if retrying
         if "ALREADY_EXISTS" in str(e):
             logging.warning(f"Task for ID {unique_id} likely already exists. Skipping.")
         else:

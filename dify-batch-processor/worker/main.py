@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 class TaskPayload:
     """Class to represent the payload received from Cloud Tasks."""
     unique_id: str
-    data: list
+    data: list[dict]
 
     @classmethod
     def from_dict(cls, payload: dict):
@@ -30,9 +30,24 @@ class TaskPayload:
 
     def to_dify_payload(self) -> dict:
         """Convert the task payload to the format required by Dify API."""
+        # {
+        #   "inputs": {
+        #     "{variable_name}":
+        #     [
+        #       {
+        #       "transfer_method": "local_file",
+        #       "upload_file_id": "{upload_file_id}",
+        #       "type": "{document_type}"
+        #       }
+        #     ]
+        #   }
+        # }
+        # 본문분석 워크플로우 input keys: "passage", "interpretation", "passageGroupId", "env"
+        # 워크북 워크플로우 input keys: "passageId", "passage", "interpretation", "passageGroupId", "env", "isNew"
+        # self.data: list of dicts, e.g., [{"id": "val1"}, {"query": "val2"}]
         return {
             "inputs": {
-                "query": self.data[0] if self.data else ""
+                key: value for item in self.data for key, value in item.items()
             },
             "response_mode": "blocking",
             "user": f"user-{self.unique_id}"
@@ -51,8 +66,8 @@ def main(request: dict):
 
     try:
         # 1. Parse the task payload
-        data = request.get_json()
-        task_payload = TaskPayload.from_dict(data)
+        request_body = request.get_json()
+        task_payload = TaskPayload.from_dict(request_body)
 
         if not task_payload.unique_id or not task_payload.data:
             logging.error("Missing 'unique_id' or 'data' in the payload.")
@@ -62,24 +77,7 @@ def main(request: dict):
         doc_ref = db.collection(Config.FIRESTORE_COLLECTION).document(task_payload.unique_id)
         doc_ref.set({'status': 'PROCESSING', 'timestamp': firestore.SERVER_TIMESTAMP}, merge=True)
 
-        # 2. Prepare and call the Dify API
-        # headers = {
-        #     "Authorization": f"Bearer {DIFY_API_KEY}",
-        #     "Content-Type": "application/json"
-        # }
-        
-        # --- Dify 페이로드 구성 ---
-        # TODO: Google Sheets의 'row_data'를 Dify 워크플로우에 필요한 페이로드 형식으로 변환해야 합니다.
-        # 이 예시에서는 row_data의 첫 번째 셀 값을 'query' 입력으로 사용한다고 가정합니다.
-        # 실제 워크플로우의 입력에 맞게 이 부분을 수정하세요.
-        # dify_payload = {
-        #     "inputs": {
-        #         "query": row_data[0] if row_data else "" 
-        #     },
-        #     "response_mode": "blocking", # 또는 "streaming"
-        #     "user": f"user-{unique_id}" # Dify 로그 추적을 위한 사용자 식별자
-        # }
-
+        # 2. Call the Dify API
         dify_payload = task_payload.to_dify_payload()
         response = requests.post(task_payload.endpoint, headers={
             "Authorization": f"Bearer {Config.DIFY_API_KEY}",
@@ -107,7 +105,6 @@ def main(request: dict):
             'message': str(e),
             'timestamp': firestore.SERVER_TIMESTAMP
         }, merge=True)
-        # Return a 500 error to allow Cloud Tasks to retry
         return "Dify API call failed", 500
         
     except Exception as e:
@@ -118,5 +115,4 @@ def main(request: dict):
             'message': str(e),
             'timestamp': firestore.SERVER_TIMESTAMP
         }, merge=True)
-        # Return a 500 error to allow Cloud Tasks to retry
         return "Internal Server Error", 500

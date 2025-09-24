@@ -170,3 +170,13 @@ variable "google_sheets_credentials_secret_id" {
   description = "The ID of the Secret Manager secret containing the Google Sheets service account credentials."
   type        = string
 }
+
+variable "passage_analysis_workflow_id" {
+  description = ""
+  type        = string
+}
+
+variable "passage_workbook_workflow_id" {
+  description = ""
+  type        = string
+}

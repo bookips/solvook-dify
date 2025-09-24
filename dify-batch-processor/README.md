@@ -105,11 +105,69 @@ resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
 Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의 커스텀 대시보드가 자동으로 생성됩니다. GCP 콘솔의 **Monitoring > Dashboards** 메뉴에서 해당 대시보드를 찾아 아래와 같은 지표를 실시간으로 확인할 수 있습니다.
 
 -   **Loader/Worker 서비스 실행 횟수**: 각 서비스의 시간당 실행 횟수
+-   **Loader/Worker 서비스 CPU, Memory 지표**: 각 서비스의 CPU, Memory  지표
 -   **Worker 서비스 실행 시간 (p50)**: Worker 서비스의 50 percentile 실행 시간
 -   **Cloud Tasks 큐 깊이**: 처리 대기 중인 태스크의 수
 -   **서비스 에러 로그**: `loader` 및 `worker` 서비스에서 발생한 심각도 `ERROR` 수준의 로그
 
-## 4. 코드 수정 포인트 (TODO)
+## 4. 로컬 개발 및 테스트 (Makefile 사용)
 
--   `loader/main.py`: `get_sheets_service()` 함수 내에 Secret Manager에서 Google Sheets 서비스 계정 키를 가져오는 로직을 구현해야 합니다.
--   `worker/main.py`: `dify_payload`를 실제 Dify 워크플로우의 입력 형식에 맞게 수정해야 합니다.
+`loader`와 `worker` 함수를 로컬 환경에서 테스트할 수 있습니다. `Makefile`을 사용하여 복잡한 설정 및 실행 과정을 간소화했습니다. 로컬 테스트는 실제 GCP 서비스 대신 Firestore 에뮬레이터를 사용합니다.
+
+### 4.1. 사전 준비 사항
+
+1.  **Python & Poetry**: 프로젝트 의존성 관리를 위해 필요합니다.
+2.  **Google Cloud CLI**: Firestore 에뮬레이터를 설치하고 실행하기 위해 필요합니다. (`gcloud components install firestore-emulator` 명령어로 설치)
+3.  **GCP 서비스 계정 키**: `loader`가 Google Sheets에 접근하기 위해 필요합니다. (`.gcp/` 디렉터리에 JSON 키 파일 저장)
+
+### 4.2. 테스트 설정
+
+1.  **(최초 1회)** `dify-batch-processor` 디렉터리에서 아래 명령어를 실행하여 Python 의존성을 설치합니다.
+    ```bash
+    make install
+    ```
+
+2.  **(최초 1회)** 환경 변수 설정 파일을 생성합니다.
+    ```bash
+    make setup
+    ```
+    이 명령어는 `.env.example` 파일을 복사하여 `.env` 파일을 생성합니다. 생성된 `.env` 파일을 열어 `YOUR_...`로 표시된 값들을 실제 프로젝트에 맞게 수정해야 합니다.
+
+### 4.3. 로컬 테스트 워크플로우
+
+테스트를 위해서는 최소 3개의 터미널 세션이 필요합니다. 모든 명령어는 `dify-batch-processor` 디렉터리에서 실행합니다.
+
+1.  **터미널 1: Firestore 에뮬레이터 실행**
+    Firestore 데이터베이스를 로컬에서 시뮬레이션하기 위해 에뮬레이터를 시작합니다.
+    ```bash
+    make run-emulator
+    ```
+    > **참고**: 테스트가 끝나면 `make stop-emulator` 명령어로 에뮬레이터를 중지할 수 있습니다.
+
+2.  **터미널 2: Worker 실행**
+    `worker` 함수를 로컬 서버로 실행하여 HTTP 요청을 받을 준비를 합니다.
+    ```bash
+    make run-worker
+    ```
+
+3.  **터미널 3: Worker 테스트**
+    실행 중인 `worker`에게 테스트용 `curl` 요청을 보내 정상적으로 작동하는지 확인합니다.
+    ```bash
+    make test-worker
+    ```
+    `worker` 터미널(터미널 2)에 성공 로그가 출력되고, Firestore 에뮬레이터에 `SUCCESS` 상태의 문서가 생성되는지 확인합니다.
+
+4.  **터미널 2: Loader 실행**
+    `worker` 테스트가 끝나면, 터미널 2에서 `Ctrl+C`로 `worker`를 중지하고 `loader`를 실행합니다.
+    ```bash
+    make run-loader
+    ```
+
+5.  **터미널 3: Loader 테스트**
+    `loader` 함수를 트리거하여 Google Sheets에서 데이터를 읽고 Firestore 에뮬레이터에 `PENDING` 상태로 기록하는지 확인합니다.
+    ```bash
+    make test-loader
+    ```
+    > **참고**: `loader`는 로컬에서 Cloud Tasks 태스크를 생성하지 못하고 오류를 출력할 수 있으나, 이는 정상적인 동작입니다. Firestore 에뮬레이터에 데이터가 `PENDING` 상태로 기록되었는지 확인하는 것이 중요합니다.
+
+언제든지 `make help` 명령어를 실행하면 사용 가능한 모든 스크립트와 설명을 확인할 수 있습니다.

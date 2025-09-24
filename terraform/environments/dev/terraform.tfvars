@@ -28,3 +28,5 @@ dify_api_endpoint                       ="http://dify-service-1030217702417.asia
 dify_api_key_secret_id                  ="dify-api-key"
 dify_api_timeout_minutes                =5
 google_sheets_credentials_secret_id     ="dify-batch-processor-credentials"
+passage_analysis_workflow_id            ="7b236e8c-a9be-4127-a8fa-07e173085d87"
+passage_workbook_workflow_id            ="9aa5df68-9912-4a74-8379-04eee2db8994"

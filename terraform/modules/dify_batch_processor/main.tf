@@ -76,6 +76,8 @@ resource "google_cloudfunctions2_function" "loader" {
       QUEUE_NAME           = google_cloud_tasks_queue.dify_batch_processor_queue.name
       WORKER_URL           = google_cloudfunctions2_function.worker.service_config[0].uri
       FIRESTORE_COLLECTION = var.firestore_collection
+      PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
+      PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
     }
     secret_environment_variables {
       key        = "GOOGLE_SHEETS_CREDENTIALS"
