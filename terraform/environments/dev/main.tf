@@ -207,8 +207,8 @@ resource "google_project_iam_member" "dify_batch_processor_sa_roles" {
   for_each = toset([
     "roles/datastore.user",
     "roles/cloudtasks.enqueuer",
-    "roles/secretmanager.secretAccessor",
-    "roles/run.invoker" # Needed for Cloud Tasks to invoke the worker
+    "roles/secretmanager.secretAccessor"
+    # "roles/run.invoker" is now granted on a per-service basis for security.
   ])
   project = var.project_id
   role    = each.value
@@ -236,4 +236,24 @@ module "dify_batch_processor" {
     google_project_service.enabled_services,
     google_project_iam_member.dify_batch_processor_sa_roles
   ]
+}
+
+# --- Cloud Scheduler to trigger the loader function daily ---
+resource "google_cloud_scheduler_job" "dify_batch_processor_trigger" {
+  project      = var.project_id
+  region       = var.region
+  name         = "dify-batch-processor-daily-trigger"
+  description  = "Triggers the Dify Batch Processor loader function every day at midnight."
+  schedule     = "0 */3 * * *" # Runs every 3 hours
+  time_zone    = "Asia/Seoul"
+  attempt_deadline = "320s"
+
+  http_target {
+    uri = module.dify_batch_processor.loader_service_uri
+    http_method = "GET"
+
+    oidc_token {
+      service_account_email = google_service_account.dify_batch_processor_sa.email
+    }
+  }
 }

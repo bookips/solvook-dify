@@ -150,13 +150,13 @@ resource "google_cloud_tasks_queue_iam_member" "loader_enqueuer" {
   member   = "serviceAccount:${var.function_service_account_email}"
 }
 
-# Allow public access to the Loader Cloud Run service (e.g., for Cloud Scheduler)
+# Allow the function's service account (used by Cloud Scheduler) to invoke the Loader service
 resource "google_cloud_run_v2_service_iam_member" "loader_invoker" {
   project  = var.project_id
   location = var.location
   name     = google_cloudfunctions2_function.loader.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = "serviceAccount:${var.function_service_account_email}"
 }
 
 # Allow Cloud Tasks to invoke the Worker Cloud Run service
