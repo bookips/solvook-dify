@@ -229,6 +229,8 @@ module "dify_batch_processor" {
   dify_api_timeout_minutes            = var.dify_api_timeout_minutes
   google_sheets_credentials_secret_id = var.google_sheets_credentials_secret_id
   function_service_account_email      = google_service_account.dify_batch_processor_sa.email
+  passage_analysis_workflow_id        = var.passage_analysis_workflow_id
+  passage_workbook_workflow_id        = var.passage_workbook_workflow_id
 
   depends_on = [
     google_project_service.enabled_services,

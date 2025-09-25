@@ -23,3 +23,4 @@ class Config:
         "본문분석": os.environ.get("PASSAGE_ANALYSIS_WORKFLOW_ID"),
         "워크북": os.environ.get("PASSAGE_WORKBOOK_WORKFLOW_ID"),
     }
+    DIFY_API_ENDPOINT = os.environ.get("DIFY_API_ENDPOINT")

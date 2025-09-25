@@ -2,7 +2,7 @@
 
 ## 1. 개요
 
-이 시스템은 Google Sheets에 저장된 데이터를 읽어 Dify LLM 워크플로우를 병렬로 실행하고, 그 결과를 안정적으로 처리하기 위해 설계되었습니다. **Cloud Run (Cloud Functions 2nd gen 기반)**, Cloud Tasks, Firestore를 사용하여 효율적이고 안정적인 데이터 처리를 보장합니다.
+이 시스템은 Google Sheets에 저장된 데이터를 읽어 Dify LLM 워크플로우를 병렬로 실행하고, 그 결과를 안정적으로 처리하기 위해 설계되었습니다. **Cloud Run (Cloud Functions 2nd gen 기반)**, Cloud Tasks, **Firestore (Datastore Mode)**를 사용하여 효율적이고 안정적인 데이터 처리를 보장합니다.
 
 ## 2. 아키텍처
 
@@ -12,7 +12,7 @@ Terraform으로 배포되는 `loader`와 `worker`는 Cloud Functions (2nd gen) �
 -   **Cloud Run (Loader)**: Google Sheets에서 데이터를 읽고, Firestore의 처리 상태를 확인하여 처리해야 할 데이터에 대한 태스크를 Cloud Tasks에 생성합니다.
 -   **Cloud Tasks**: `Loader`로부터 받은 태스크를 큐에 저장하고, `Worker`에게 분산하여 전달합니다. 실패 시 설정된 정책에 따라 자동으로 재시도합니다.
 -   **Cloud Run (Worker)**: Cloud Tasks로부터 태스크를 받아 Dify API를 호출하여 실제 워크플로우를 실행하고, 결과를 Firestore에 업데이트합니다. **동시에 실행되는 Worker 인스턴스의 수는 Cloud Tasks 큐 설정으로 제어됩니다.**
--   **Firestore**: 각 데이터의 처리 상태(`PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`)를 저장하고 관리합니다.
+-   **Firestore (Datastore Mode)**: 각 데이터의 처리 상태(`PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`)를 저장하고 관리합니다.
 
 ## 3. 설정 및 배포 (Terraform)
 
@@ -43,7 +43,7 @@ Terraform으로 배포되는 `loader`와 `worker`는 Cloud Functions (2nd gen) �
             ```bash
             printf "YOUR_DIFY_API_KEY" | gcloud secrets versions add dify-api-key --data-file=-
             ```
-6.  **Firestore 설정**: Native 모드로 Firestore 데이터베이스를 생성합니다.
+6.  **Firestore 설정**: GCP 프로젝트에서 **Datastore 모드**로 Firestore 데이터베이스를 활성화합니다.
 
 ### 3.2. Terraform 변수 설정
 
@@ -117,8 +117,13 @@ Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의
 ### 4.1. 사전 준비 사항
 
 1.  **Python & Poetry**: 프로젝트 의존성 관리를 위해 필요합니다.
-2.  **Google Cloud CLI**: Firestore 에뮬레이터를 설치하고 실행하기 위해 필요합니다. (`gcloud components install firestore-emulator` 명령어로 설치)
-3.  **GCP 서비스 계정 키**: `loader`가 Google Sheets에 접근하기 위해 필요합니다. (`.gcp/` 디렉터리에 JSON 키 파일 저장)
+2.  **Google Cloud CLI**: Firestore 에뮬레이터를 설치하고 실행하기 위해 필요합니다. 아래 명령어를 실행하여 `beta` 컴포넌트와 에뮬레이터를 설치하세요.
+    ```bash
+    gcloud components install beta
+    gcloud components install cloud-firestore-emulator
+    ```
+3.  **Java 8+ JRE**: Firestore 에뮬레이터는 Java로 실행되므로, 시스템에 Java 8 이상의 버전이 설치되어 있어야 합니다.
+4.  **GCP 서비스 계정 키**: `loader`가 Google Sheets에 접근하기 위해 필요합니다. (`.gcp/` 디렉터리에 JSON 키 파일 저장)
 
 ### 4.2. 테스트 설정
 
@@ -155,7 +160,15 @@ Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의
     ```bash
     make test-worker
     ```
-    `worker` 터미널(터미널 2)에 성공 로그가 출력되고, Firestore 에뮬레이터에 `SUCCESS` 상태의 문서가 생성되는지 확인합니다.
+    `worker` 터미널(터미널 2)에 성공 로그가 출력되는지 확인합니다. Firestore 에뮬레이터에 `SUCCESS` 상태의 문서가 생성되었는지는 아래 방법으로 확인할 수 있습니다.
+
+    #### 에뮬레이터 데이터 확인
+    
+    Firestore 에뮬레이터는 데이터 확인을 위한 웹 UI를 제공합니다. 이 방법을 사용하는 것을 권장합니다.
+    
+    1.  웹 브라우저에서 `http://localhost:4000` 으로 접속합니다.
+    2.  **Kind** 목록에서 `dify_batch_process_status`를 선택합니다.
+    3.  **Key / ID** 목록에서 확인하고 싶은 ID(예: `local-test-from-make`)를 클릭하면 우측에 저장된 데이터(`status`, `result` 등)를 확인할 수 있습니다.
 
 4.  **터미널 2: Loader 실행**
     `worker` 테스트가 끝나면, 터미널 2에서 `Ctrl+C`로 `worker`를 중지하고 `loader`를 실행합니다.
@@ -171,3 +184,13 @@ Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의
     > **참고**: `loader`는 로컬에서 Cloud Tasks 태스크를 생성하지 못하고 오류를 출력할 수 있으나, 이는 정상적인 동작입니다. Firestore 에뮬레이터에 데이터가 `PENDING` 상태로 기록되었는지 확인하는 것이 중요합니다.
 
 언제든지 `make help` 명령어를 실행하면 사용 가능한 모든 스크립트와 설명을 확인할 수 있습니다.
+
+### 4.4. 문제 해결 (Troubleshooting)
+
+#### `CONSUMER_INVALID` 에러 발생 시
+
+로컬 환경에서 `loader` 또는 `worker` 실행 시, Cloud Tasks나 Firestore API 호출에서 `PermissionDenied: 403 ... reason: "CONSUMER_INVALID"` 와 같은 에러가 발생할 수 있습니다.
+
+*   **원인**: 이 에러는 IAM 권한 부족이 아니라, GCP 조직에 설정된 **VPC 서비스 제어(VPC Service Controls)**와 같은 보안 정책 때문일 가능성이 매우 높습니다. 이 정책은 신뢰할 수 없는 네트워크(예: 로컬 개발 환경)에서 GCP 서비스로의 API 호출을 차단합니다.
+
+*   **해결 방안**: 가장 확실한 해결책은 보안 경계 **내부**에서 코드를 실행하는 것입니다. GCP 프로젝트 내에 작은 GCE(Google Compute Engine) VM 인스턴스를 생성하고, 해당 VM에 접속하여 개발 환경을 구성한 뒤 `make run-loader`나 `make run-worker`를 실행하면 이 문제를 우회할 수 있습니다. 모든 API 호출이 GCP 내부 네트워크에서 발생하므로 보안 정책에 의해 차단되지 않습니다.

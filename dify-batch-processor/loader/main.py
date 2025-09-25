@@ -1,16 +1,42 @@
 import json
 import logging
-import os
+from datetime import datetime
 import functions_framework
-from google.cloud import firestore, tasks_v2
+from google.cloud import datastore, tasks_v2
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from config import Config
 
-db = firestore.Client()
-tasks_client = tasks_v2.CloudTasksClient()
+def get_gcp_credentials():
+    """Builds and returns a GCP credentials object from a service account file."""
+    # This function is primarily for local development.
+    # In GCP, the client libraries automatically use the attached service account.
+    if Config.GOOGLE_APPLICATION_CREDENTIALS:
+        return service_account.Credentials.from_service_account_file(
+            Config.GOOGLE_APPLICATION_CREDENTIALS,
+            scopes=[
+                'https://www.googleapis.com/auth/cloud-platform',
+                'https://www.googleapis.com/auth/spreadsheets.readonly'
+            ] # Broad scope for all services
+        )
+    return None # In GCP, this will be None, and clients will use ADC.
 
+# --- Clients ---
+credentials = get_gcp_credentials()
+
+# Initialize clients with explicit credentials for local testing
+if Config.DATASTORE_EMULATOR_HOST:
+    db = datastore.Client(project=Config.PROJECT_ID)
+else:
+    db = datastore.Client(project=Config.PROJECT_ID, credentials=credentials)
+
+tasks_client = tasks_v2.CloudTasksClient(credentials=credentials)
+
+# Configure logging at the module level
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
@@ -19,17 +45,17 @@ def stream_structured_sheet_data(
     spreadsheet_id: str,
     sheet_name: str,
     header_row: int = 1,
-    chunk_size: int = 1000,
+    chunk_size: int = 300,
     filter_column_name: str | None = None,
     filter_column_value: str | None = None
 ):
     """
-    Reads data from Google Sheets in chunks and yields each row as a generator,
-    avoiding loading the entire sheet into memory.
+    Reads data from Google Sheets in chunks and yields each row as a generator.
     """
     try:
+        sheets_api = sheet_service.spreadsheets()
         header_range = f"{sheet_name}!A{header_row}:Z{header_row}"
-        header_result = sheet_service.values().get(spreadsheetId=spreadsheet_id, range=header_range).execute()
+        header_result = sheets_api.values().get(spreadsheetId=spreadsheet_id, range=header_range).execute()
         header = header_result.get('values', [[]])[0]
 
         if not header:
@@ -39,7 +65,7 @@ def stream_structured_sheet_data(
         current_row_index = header_row + 1
         while True:
             data_range = f"{sheet_name}!A{current_row_index}:Z{current_row_index + chunk_size - 1}"
-            result = sheet_service.values().get(spreadsheetId=spreadsheet_id, range=data_range).execute()
+            result = sheets_api.values().get(spreadsheetId=spreadsheet_id, range=data_range).execute()
             rows = result.get('values', [])
 
             if not rows:
@@ -79,24 +105,9 @@ def find_data_by_name(structured_row: list[dict], name: str) -> str | None:
     return None
 
 
-def get_sheets_service():
+def get_sheets_service(creds):
     """Builds and returns a Google Sheets API service object."""
-    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-        creds = service_account.Credentials.from_service_account_file(
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-            scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
-        )
-    else:
-        from google.cloud import secretmanager
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{Config.PROJECT_ID}/secrets/{Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID}/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        creds_json = response.payload.data.decode("UTF-8")
-        creds_info = json.loads(creds_json)
-        creds = service_account.Credentials.from_service_account_info(creds_info)
-
-    service = build('sheets', 'v4', credentials=creds)
-    return service
+    return build('sheets', 'v4', credentials=creds)
 
 
 def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = True) -> dict:
@@ -126,56 +137,36 @@ def create_unique_id_by_category(data: list[dict], category: str) -> str:
     passage_group_id = find_data_by_name(data, "passageGroupId")
     match category:
         case "본문분석":
-            return f"{workflow_id}/{passage_group_id}"
+            return f"{workflow_id}_{passage_group_id}"
         case "워크북":
             passage_id = find_data_by_name(data, "passageId")
-            return f"{workflow_id}/{passage_group_id}/{passage_id}"
+            return f"{workflow_id}_{passage_group_id}_{passage_id}"
 
 
-def get_task_status(task_id: str, is_pattern_search: bool = False) -> str | None:
-    """
-    Retrieves the status of a task from Firestore.
-    Can perform an exact match or a pattern-based search.
-
-    Args:
-        task_id: The document ID or ID pattern to search for.
-        is_pattern_search: If True, performs a 'starts with' search. 
-                           If any matching doc is 'SUCCESS', returns 'SUCCESS'.
-                           If False, performs an exact match for the given task_id.
-
-    Returns:
-        The status string ('SUCCESS', 'PENDING', etc.) or None if not found.
-    """
-    collection_ref = db.collection(Config.FIRESTORE_COLLECTION)
-    
-    if is_pattern_search:
-        end_pattern = task_id[:-1] + chr(ord(task_id[-1]) + 1)
-        query = collection_ref.where(firestore.FieldPath.document_id(), ">=", task_id) \
-                              .where(firestore.FieldPath.document_id(), "<", end_pattern)
-        
-        for doc in query.stream():
-            if doc.to_dict().get('status') == 'SUCCESS':
-                return 'SUCCESS'
-        return None
-    else:
-        doc_ref = collection_ref.document(task_id)
-        doc = doc_ref.get()
-        if doc.exists:
-            return doc.to_dict().get('status')
-        return None
+def get_task_status(task_id: str) -> str | None:
+    """Retrieves the status of a task from Datastore by its key."""
+    key = db.key(Config.FIRESTORE_COLLECTION, task_id)
+    entity = db.get(key)
+    if entity:
+        return entity.get('status')
+    return None
 
 
 @functions_framework.http
 def main(request: dict):
     """
     Main function for the Loader Cloud Function.
-    Reads data from Google Sheets, filters it based on Firestore status,
+    Reads data from Google Sheets, filters it based on Datastore status,
     and creates tasks in Cloud Tasks for processing.
     """
     try:
-        service = get_sheets_service()
+        # Get credentials. This will be None in GCP, which is expected.
+        creds = get_gcp_credentials()
+        
+        # Build the sheets service with the credentials
+        sheets_service = get_sheets_service(creds)
         data_stream = stream_structured_sheet_data(
-            sheet_service=service,
+            sheet_service=sheets_service,
             spreadsheet_id=Config.SPREADSHEET_ID,
             sheet_name=Config.SHEET_NAME,
             filter_column_name="target",
@@ -195,27 +186,24 @@ def main(request: dict):
 
             for each in category.split(","):
                 each = each.strip()
-                unique_id = create_unique_id_by_category(structured_row, each)
+                unique_id = create_unique_id_by_category(structured_row, each, row_number)
 
-                # Use pattern search to see if any previous attempt for this pattern was successful.
-                status = get_task_status(unique_id, is_pattern_search=(each=="워크북"))
-                
-                isNew = each == "워크북" and status == "SUCCESS" 
+                status = get_task_status(unique_id)
+                isNew = each == "워크북" and status == "SUCCESS"
                 input_data = to_dify_inputs_by_category(structured_row, each, isNew)
 
                 if status != 'SUCCESS' or isNew:
-                    # Always create a new, unique ID with a timestamp for the actual task.
-                    unique_task_id = f"{unique_id}/{int(firestore.SERVER_TIMESTAMP.now().timestamp())}"
-                    
-                    create_cloud_task(input_data, unique_task_id)
+                    task_id = f"{unique_id}_{int(datetime.now().timestamp())}"
+                    create_cloud_task(input_data, task_id)
                     tasks_created_count += 1
 
-                    # Update state by unique_id to 'PENDING' if not already 'SUCCESS'
-                    doc_ref = db.collection(Config.FIRESTORE_COLLECTION).document(unique_id)
-                    doc_ref.set({
+                    key = db.key(Config.FIRESTORE_COLLECTION, unique_id)
+                    entity = datastore.Entity(key=key)
+                    entity.update({
                         'status': 'PENDING',
-                        'timestamp': firestore.SERVER_TIMESTAMP
-                    }, merge=True)
+                        'timestamp': datetime.now()
+                    })
+                    db.put(entity)
 
         if processed_rows == 0:
             logging.info("No data found in Google Sheets that matches the filter.")
@@ -239,8 +227,8 @@ def create_cloud_task(input_data: dict, task_id: str):
             "headers": {"Content-type": "application/json"},
         }
     }
-    splitted = task_id.split('/')
-    workflow_id, unique_id = splitted[0], '/'.join(splitted[:-1]) # unique_id without timestamp
+    splitted = task_id.split('_')
+    workflow_id, unique_id = splitted[0], '_'.join(splitted[:-1])
     payload = {
         "unique_id": unique_id,
         "data": input_data,
@@ -255,7 +243,7 @@ def create_cloud_task(input_data: dict, task_id: str):
         logging.info(f"Created task: {response.name} on dify workflow {workflow_id}")
     except Exception as e:
         if "ALREADY_EXISTS" in str(e):
-            logging.warning(f"Task for ID {unique_id} likely already exists. Skipping.")
+            logging.warning(f"Task for ID {task_id} likely already exists. Skipping.")
         else:
-            logging.error(f"Error creating task for ID {unique_id}: {e}")
+            logging.error(f"Error creating task for ID {task_id}: {e}")
             raise

@@ -20,25 +20,22 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Local Development Workflow:"
-	@echo "  1. make install    # Install dependencies (run once)"
-	@echo "  2. make setup      # Create .env file from .env.example (run once)"
-	@echo "  3. make run-emulator # Start Firestore emulator in a separate terminal"
-	@echo "  4. make run-worker   # Run worker in another terminal"
-	@echo "  5. make test-worker  # Test worker from a third terminal"
-	@echo "  6. make run-loader   # Run loader in another terminal"
-	@echo "  7. make test-loader  # Test loader from a third terminal"
-	@echo "  8. make stop-emulator# Stop emulator when done"
+	@echo "  1. make install          # Install dependencies (run once)"
+	@echo "  2. make setup            # Create .env file from .env.example (run once)"
+	@echo "  3. make run-emulator-fg  # In Terminal 1, run the Firestore emulator in the foreground"
+	@echo "  4. make run-worker       # In Terminal 2, run the worker"
+	@echo "  5. make test-worker      # In Terminal 3, test the running worker"
+	@echo "  6. make stop-emulator    # In any terminal, stop the emulator when done"
 	@echo ""
 	@echo "Available Targets:"
 	@echo "  install          Install python dependencies using poetry."
 	@echo "  setup            Create .env file from .env.example if it doesn't exist."
-	@echo "  run-emulator     Start Firestore emulator in the background."
-	@echo "  stop-emulator    Stop the background Firestore emulator."
+	@echo "  run-emulator-fg  Run Firestore emulator in the foreground. (Requires Java 8+)"
+	@echo "  stop-emulator    Stop the running Firestore emulator."
 	@echo "  run-loader       Run the loader function on port $(LOADER_PORT)."
 	@echo "  run-worker       Run the worker function on port $(WORKER_PORT)."
 	@echo "  test-loader      Send a test request to the running loader."
 	@echo "  test-worker      Send a test request to the running worker."
-	@echo "  clean            Remove emulator pid file."
 
 install:
 	@echo "--> Installing dependencies using poetry..."
@@ -53,35 +50,28 @@ setup:
 		echo "--> .env file already exists. Skipping creation."; \
 	fi
 
-run-emulator:
-	@if [ -f $(EMULATOR_PID_FILE) ]; then \
-		echo "--> Firestore emulator is already running with PID: $$(cat $(EMULATOR_PID_FILE))."; \
-		exit 0; \
-	fi
-	@echo "--> Starting Firestore emulator on $(EMULATOR_HOST_PORT)..."
-	@gcloud beta emulators firestore start --host-port=$(EMULATOR_HOST_PORT) > /dev/null 2>&1 & echo $$! > $(EMULATOR_PID_FILE)
-	@echo "--> Firestore emulator started with PID: $$(cat $(EMULATOR_PID_FILE)). Use 'make stop-emulator' to stop it."
+run-emulator-fg:
+	@echo "--> Starting Firestore emulator in Datastore Mode... (Press Ctrl+C to stop)"
+	@gcloud beta emulators firestore start --host-port=$(EMULATOR_HOST_PORT) --database-mode=datastore-mode
 
 stop-emulator:
-	@if [ -f $(EMULATOR_PID_FILE) ]; then \
-		echo "--> Stopping Firestore emulator (PID: $$(cat $(EMULATOR_PID_FILE)))"; \
-		kill $$(cat $(EMULATOR_PID_FILE)); \
-		rm $(EMULATOR_PID_FILE); \
+	@echo "--> Attempting to stop Firestore emulator on port $(EMULATOR_PORT)..."
+	@PID=$(lsof -t -i:$(EMULATOR_PORT)); \
+	if [ -n "$PID" ]; then \
+		echo "--> Found emulator process with PID: $PID. Stopping..."; \
+		kill $PID; \
 		echo "--> Emulator stopped."; \
 	else \
-		echo "--> Emulator PID file not found. It seems the emulator is not running."; \
+		echo "--> No emulator process found on port $(EMULATOR_PORT)."; \
 	fi
 
 run-loader: setup
 	@echo "--> Running loader on http://localhost:$(LOADER_PORT)... (Press Ctrl+C to stop)"
-	@export $$(grep -v '^#' .env | xargs) && \
 	poetry run functions-framework --source=loader/main.py --target=main --port=$(LOADER_PORT)
 
 run-worker: setup
 	@echo "--> Running worker on http://localhost:$(WORKER_PORT)... (Press Ctrl+C to stop)"
-	@export $$(grep -v '^#' .env | xargs) && \
 	poetry run functions-framework --source=worker/main.py --target=main --port=$(WORKER_PORT)
-
 test-loader:
 	@echo "--> Sending test request to loader..."
 	@curl -w "\n" http://localhost:$(LOADER_PORT)
@@ -89,11 +79,11 @@ test-loader:
 test-worker:
 	@echo "--> Sending test request to worker..."
 	@DIFY_ENDPOINT=$$(grep DIFY_API_ENDPOINT .env | cut -d '=' -f2- | tr -d '"'); \
-	curl -X POST http://localhost:$(WORK_PORT) \
+	curl -X POST http://localhost:$(WORKER_PORT) \
 	-H "Content-Type: application/json" \
 	-d '{ \
 		"unique_id": "local-test-from-make", \
-		"data": ["This is a local test query from Makefile."], \
+		"data": [{"passageId": "local-test-passage-id"}, {"env": "local"}, {"passageGroupId": "local-test-passage-group-id"}], \
 		"endpoint": "'$$DIFY_ENDPOINT'" \
 	}' \
 	-w "\n"

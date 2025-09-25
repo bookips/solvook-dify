@@ -61,3 +61,13 @@ variable "function_service_account_email" {
   description = "The email of the service account to run the Cloud Functions."
   type        = string
 }
+
+variable "passage_analysis_workflow_id" {
+  description = ""
+  type        = string
+}
+
+variable "passage_workbook_workflow_id" {
+  description = ""
+  type        = string
+}

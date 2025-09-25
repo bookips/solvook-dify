@@ -78,6 +78,7 @@ resource "google_cloudfunctions2_function" "loader" {
       FIRESTORE_COLLECTION = var.firestore_collection
       PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
       PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
+      DIFY_API_ENDPOINT    = var.dify_api_endpoint
     }
     secret_environment_variables {
       key        = "GOOGLE_SHEETS_CREDENTIALS"
