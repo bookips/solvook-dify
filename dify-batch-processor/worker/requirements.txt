@@ -1,5 +1,10 @@
 # Google Cloud
-google-cloud-firestore
+google-cloud-datastore
+google-cloud-secret-manager
+functions-framework
 
 # HTTP Requests
 requests
+
+# For local development .env loading
+python-dotenv

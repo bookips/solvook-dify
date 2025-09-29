@@ -215,6 +215,14 @@ resource "google_project_iam_member" "dify_batch_processor_sa_roles" {
   member  = "serviceAccount:${google_service_account.dify_batch_processor_sa.email}"
 }
 
+# Allow the service account to "act as" itself, which is required for creating
+# Cloud Tasks with OIDC tokens that use the same service account.
+resource "google_service_account_iam_member" "dify_batch_processor_sa_actas_self" {
+  service_account_id = google_service_account.dify_batch_processor_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.dify_batch_processor_sa.email}"
+}
+
 
 module "dify_batch_processor" {
   source = "../../modules/dify_batch_processor"

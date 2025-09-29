@@ -185,7 +185,19 @@ Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의
 
 언제든지 `make help` 명령어를 실행하면 사용 가능한 모든 스크립트와 설명을 확인할 수 있습니다.
 
-### 4.4. 문제 해결 (Troubleshooting)
+### 4.4. 배포된 서비스 테스트 (End-to-End)
+
+로컬 테스트와 별개로, GCP에 배포된 전체 파이프라인을 즉시 실행하여 테스트할 수 있습니다.
+
+`dify-batch-processor` 디렉터리에서 아래 명령어를 실행하면, Terraform으로 배포된 Cloud Scheduler 작업을 즉시 트리거합니다. 이 작업은 `loader` 서비스를 호출하여 전체 데이터 처리 파이프라인을 시작합니다.
+
+```bash
+make test-deployed
+```
+
+명령 실행 후 GCP 콘솔의 Cloud Logging에서 `dify-batch-processor-loader`와 `dify-batch-processor-worker` 서비스의 로그를 확인하여 작업이 정상적으로 수행되었는지 확인할 수 있습니다.
+
+### 4.5. 문제 해결 (Troubleshooting)
 
 #### `CONSUMER_INVALID` 에러 발생 시
 

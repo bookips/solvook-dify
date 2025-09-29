@@ -147,7 +147,7 @@ def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = Tr
                 "interpretation": find_data_by_name(data, "interpretation"),
                 "passageGroupId": find_data_by_name(data, "passageGroupId"),
                 "env": find_data_by_name(data, "env"),
-                "isNew": isNew
+                "isNew": "true" if isNew else "false"
             }
 
 
@@ -249,6 +249,9 @@ def create_cloud_task(input_data: dict, task_id: str):
             "http_method": tasks_v2.HttpMethod.POST,
             "url": Config.WORKER_URL,
             "headers": {"Content-type": "application/json"},
+            "oidc_token": {
+                "service_account_email": Config.FUNCTION_SERVICE_ACCOUNT_EMAIL,
+            },
         }
     }
     splitted = task_id.split('_')
@@ -256,7 +259,7 @@ def create_cloud_task(input_data: dict, task_id: str):
     payload = {
         "unique_id": unique_id,
         "data": input_data,
-        "endpoint": f"{Config.DIFY_API_ENDPOINT}/workflows/{workflow_id}/run",
+        "workflow_id": workflow_id,
     }
 
     task["http_request"]["body"] = json.dumps(payload).encode()

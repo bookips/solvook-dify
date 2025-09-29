@@ -10,8 +10,12 @@ EMULATOR_PORT := 8080
 EMULATOR_HOST_PORT = localhost:$(EMULATOR_PORT)
 EMULATOR_PID_FILE := .emulator.pid
 
+# --- Cloud Configuration (for testing deployed resources) ---
+GCP_LOCATION ?= asia-northeast3
+SCHEDULER_JOB_NAME ?= dify-batch-processor-daily-trigger
+
 # Phony targets (targets that don't represent files)
-.PHONY: help all install setup run-emulator stop-emulator run-loader run-worker test-loader test-worker clean
+.PHONY: help all install setup run-emulator stop-emulator run-loader run-worker test-loader test-worker test-deployed clean
 
 # Default target
 all: help
@@ -26,6 +30,9 @@ help:
 	@echo "  4. make run-worker       # In Terminal 2, run the worker"
 	@echo "  5. make test-worker      # In Terminal 3, test the running worker"
 	@echo "  6. make stop-emulator    # In any terminal, stop the emulator when done"
+	@echo ""
+	@echo "Cloud Testing:"
+	@echo "  test-deployed    Trigger the deployed Cloud Scheduler job to run immediately."
 	@echo ""
 	@echo "Available Targets:"
 	@echo "  install          Install python dependencies using poetry."
@@ -56,10 +63,10 @@ run-emulator-fg:
 
 stop-emulator:
 	@echo "--> Attempting to stop Firestore emulator on port $(EMULATOR_PORT)..."
-	@PID=$(lsof -t -i:$(EMULATOR_PORT)); \
-	if [ -n "$PID" ]; then \
-		echo "--> Found emulator process with PID: $PID. Stopping..."; \
-		kill $PID; \
+	@PID=$$(lsof -t -i:$(EMULATOR_PORT)); \
+	if [ -n "$$PID" ]; then \
+		echo "--> Found emulator process with PID: $$PID. Stopping..."; \
+		kill $$PID; \
 		echo "--> Emulator stopped."; \
 	else \
 		echo "--> No emulator process found on port $(EMULATOR_PORT)."; \
@@ -87,6 +94,11 @@ test-worker:
 		"endpoint": "'$$DIFY_ENDPOINT'" \
 	}' \
 	-w "\n"
+
+test-deployed:
+	@echo "--> Triggering deployed Cloud Scheduler job '$(SCHEDULER_JOB_NAME)' in location '$(GCP_LOCATION)'..."
+	@gcloud scheduler jobs run $(SCHEDULER_JOB_NAME) --location $(GCP_LOCATION)
+	@echo "--> Job triggered. Check GCP console for logs."
 
 clean:
 	@echo "--> Cleaning up emulator PID file..."

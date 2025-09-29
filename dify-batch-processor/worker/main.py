@@ -1,9 +1,10 @@
 from dataclasses import dataclass
+import json
 import requests
 import logging
 from datetime import datetime
 import functions_framework
-from google.cloud import datastore
+from google.cloud import datastore, secretmanager
 from dotenv import load_dotenv
 
 # Load environment variables from .env file for local development
@@ -11,14 +12,28 @@ load_dotenv()
 
 from config import Config
 
+def get_secret(project_id, secret_id, version_id="latest"):
+    """Fetches a secret from Google Secret Manager."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
+
 # --- Clients ---
-# Use Datastore client instead of Firestore
-# When using the emulator, explicitly providing the project ID prevents the client
-# from trying to use Application Default Credentials to determine the project.
-if Config.DATASTORE_EMULATOR_HOST:
-    db = datastore.Client(project=Config.PROJECT_ID)
+db = datastore.Client(project=Config.PROJECT_ID)
+
+# Fetch Dify API Key from Secret Manager
+DIFY_API_KEY_BY_WORKFLOW_ID = None
+if Config.PROJECT_ID and Config.DIFY_API_KEY_SECRET_ID:
+    try:
+        secret_api_json = get_secret(Config.PROJECT_ID, Config.DIFY_API_KEY_SECRET_ID)
+        DIFY_API_KEY_BY_WORKFLOW_ID = json.loads(secret_api_json)
+    except Exception as e:
+        logging.critical(f"Failed to fetch DIFY_API_KEY from Secret Manager: {e}", exc_info=True)
+        # If the API key is critical for startup, you might want to exit or handle this differently.
 else:
-    db = datastore.Client()
+    logging.critical("GCP_PROJECT_ID and DIFY_API_KEY_SECRET_ID must be set.")
+
 
 # Configure logging at the module level
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -45,7 +60,7 @@ class TaskPayload:
     """Class to represent the payload received from Cloud Tasks."""
     unique_id: str
     data: dict
-    endpoint: str
+    workflow_id: str
 
     @classmethod
     def from_dict(cls, payload: dict):
@@ -53,7 +68,7 @@ class TaskPayload:
         return cls(
             unique_id=payload.get("unique_id"),
             data=payload.get("data", {}),
-            endpoint=payload.get("endpoint")
+            workflow_id=payload.get("workflow_id")
         )
 
     def to_dify_payload(self) -> dict:
@@ -73,6 +88,10 @@ def main(request: dict):
     Receives a task from Cloud Tasks, executes the Dify workflow,
     and updates the status in Datastore.
     """
+    if not DIFY_API_KEY_BY_WORKFLOW_ID:
+        logging.error("DIFY_API_KEY is not configured. Aborting.")
+        return "Internal Server Error: Service is not configured.", 500
+        
     if request.method != 'POST':
         return 'Only POST requests are accepted', 405
 
@@ -85,20 +104,29 @@ def main(request: dict):
         if not task_payload.unique_id or not task_payload.data:
             logging.error("Missing 'unique_id' or 'data' in the payload.")
             return "Bad Request: Missing payload data.", 400
-
+        
+        logging.info(f"Processing task for ID: {task_payload.unique_id}")
         # Update Datastore status to 'PROCESSING'
         save_to_datastore(task_payload.unique_id, 'PROCESSING')
         # 2. Prepare and call the Dify API
         dify_payload = task_payload.to_dify_payload()
         response = requests.post(
-            task_payload.endpoint,
+            Config.DIFY_API_ENDPOINT,
             headers={
-                "Authorization": f"Bearer {Config.DIFY_API_KEY}",
+                "Authorization": f"Bearer {DIFY_API_KEY_BY_WORKFLOW_ID.get(task_payload.workflow_id)}",
                 "Content-Type": "application/json"
             },
             json=dify_payload,
             timeout=Config.DIFY_API_TIMEOUT_MINUTES * 60
         )
+
+        # Handle specific HTTP errors like 403 Forbidden, which indicates an auth problem.
+        if response.status_code == 403:
+            error_message = "Dify API returned 403 Forbidden. Check if the DIFY_API_KEY is correct and has permissions."
+            logging.error(f"{error_message} for ID {task_payload.unique_id}")
+            save_to_datastore(task_payload.unique_id, 'FAILED', message=error_message)
+            return "Dify API Forbidden", 500
+
         response.raise_for_status()
 
         # 3. Update Datastore with the result

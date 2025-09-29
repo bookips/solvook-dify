@@ -32,14 +32,28 @@ resource "google_storage_bucket" "worker_bucket" {
 # The following resources define two functions that are automatically deployed as Cloud Run services.
 
 # 1. Data Loader Service (triggered by HTTP)
+
+# Create a hash of the source directory's contents.
+# This will change whenever a file is modified, triggering a new archive to be created.
+resource "null_resource" "loader_source_hash" {
+  triggers = {
+    # Create a single hash representing the state of all source files.
+    # This trigger will change if any file is added, removed, or modified.
+    source_code_hash = md5(jsonencode({
+      for f in fileset("${path.module}/../../../dify-batch-processor/loader", "**") :
+      f => filemd5("${path.module}/../../../dify-batch-processor/loader/${f}")
+    }))
+  }
+}
+
 data "archive_file" "loader_source" {
   type        = "zip"
   source_dir  = "${path.module}/../../../dify-batch-processor/loader"
-  output_path = "/tmp/loader_source.zip"
+  output_path = "/tmp/loader_source_${null_resource.loader_source_hash.id}.zip"
 }
 
 resource "google_storage_bucket_object" "loader_source_object" {
-  name   = "source/dify-loader-source.zip"
+  name   = "source/dify-loader-source-${null_resource.loader_source_hash.id}.zip"
   bucket = google_storage_bucket.loader_bucket.name
   source = data.archive_file.loader_source.output_path
 }
@@ -49,6 +63,7 @@ resource "google_cloudfunctions2_function" "loader" {
   project  = var.project_id
   location = var.location
   name     = "${var.name_prefix}-loader"
+  description = "Data Loader Service"
 
   build_config {
     runtime     = "python313"
@@ -80,19 +95,32 @@ resource "google_cloudfunctions2_function" "loader" {
       PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
       DIFY_API_ENDPOINT    = var.dify_api_endpoint
       GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
+      FUNCTION_SERVICE_ACCOUNT_EMAIL      = var.function_service_account_email
     }
   }
 }
 
 # 2. Dify Worker Service (triggered by Cloud Tasks)
+
+# Create a hash of the source directory's contents for the worker.
+resource "null_resource" "worker_source_hash" {
+  triggers = {
+    # Create a single hash representing the state of all source files.
+    source_code_hash = md5(jsonencode({
+      for f in fileset("${path.module}/../../../dify-batch-processor/worker", "**") :
+      f => filemd5("${path.module}/../../../dify-batch-processor/worker/${f}")
+    }))
+  }
+}
+
 data "archive_file" "worker_source" {
   type        = "zip"
   source_dir  = "${path.module}/../../../dify-batch-processor/worker"
-  output_path = "/tmp/worker_source.zip"
+  output_path = "/tmp/worker_source_${null_resource.worker_source_hash.id}.zip"
 }
 
 resource "google_storage_bucket_object" "worker_source_object" {
-  name   = "source/dify-worker-source.zip"
+  name   = "source/dify-worker-source-${null_resource.worker_source_hash.id}.zip"
   bucket = google_storage_bucket.worker_bucket.name
   source = data.archive_file.worker_source.output_path
 }
@@ -102,6 +130,7 @@ resource "google_cloudfunctions2_function" "worker" {
   project  = var.project_id
   location = var.location
   name     = "${var.name_prefix}-worker"
+  description = "Dify Worker Service"
 
   build_config {
     runtime     = "python313"
@@ -121,15 +150,11 @@ resource "google_cloudfunctions2_function" "worker" {
     timeout_seconds    = 300 # 5 minutes for Dify API call
     service_account_email = var.function_service_account_email
     environment_variables = {
+      GCP_PROJECT_ID             = var.project_id
       DIFY_API_ENDPOINT          = var.dify_api_endpoint
       FIRESTORE_COLLECTION       = var.firestore_collection
       DIFY_API_TIMEOUT_MINUTES   = var.dify_api_timeout_minutes
-    }
-    secret_environment_variables {
-      key        = "DIFY_API_KEY"
-      project_id = var.project_id
-      secret     = var.dify_api_key_secret_id
-      version    = "latest"
+      DIFY_API_KEY_SECRET_ID     = var.dify_api_key_secret_id
     }
   }
 }

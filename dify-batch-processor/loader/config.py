@@ -17,6 +17,7 @@ class Config:
     # For local development
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     DATASTORE_EMULATOR_HOST = os.environ.get("DATASTORE_EMULATOR_HOST")
+    FUNCTION_SERVICE_ACCOUNT_EMAIL = os.environ.get("FUNCTION_SERVICE_ACCOUNT_EMAIL")
 
     # Cloud Tasks Info
     QUEUE_NAME = os.environ.get("QUEUE_NAME") # The name of the Cloud Tasks queue
