@@ -11,7 +11,12 @@ class Config:
     SHEET_NAME = os.environ.get("SHEET_NAME")
     # The column index (0-based) to be used as a unique ID for each row.
     # 행 번호를 ID로 사용하려면 'ROW_NUMBER'로 설정하세요.
-    UNIQUE_ID_COLUMN = os.environ.get("id", "0") 
+    UNIQUE_ID_COLUMN = os.environ.get("id", "0")
+    GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_SECRET_ID")
+
+    # For local development
+    GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    DATASTORE_EMULATOR_HOST = os.environ.get("DATASTORE_EMULATOR_HOST")
 
     # Cloud Tasks Info
     QUEUE_NAME = os.environ.get("QUEUE_NAME") # The name of the Cloud Tasks queue

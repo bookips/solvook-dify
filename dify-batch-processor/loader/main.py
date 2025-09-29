@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 import functions_framework
-from google.cloud import datastore, tasks_v2
+from google.cloud import datastore, tasks_v2, secretmanager
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -11,30 +11,50 @@ load_dotenv()
 
 from config import Config
 
+def get_secret(project_id, secret_id, version_id="latest"):
+    """Fetches a secret from Google Secret Manager."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
+
 def get_gcp_credentials():
-    """Builds and returns a GCP credentials object from a service account file."""
-    # This function is primarily for local development.
-    # In GCP, the client libraries automatically use the attached service account.
+    """
+    Builds and returns a GCP credentials object for Google Sheets API.
+    - For local development, it uses the service account file specified by GOOGLE_APPLICATION_CREDENTIALS.
+    - In a GCP environment, it fetches the credentials from Secret Manager.
+    """
+    scopes = [
+        'https://www.googleapis.com/auth/spreadsheets.readonly'
+    ]
+    # For local development with a service account file
     if Config.GOOGLE_APPLICATION_CREDENTIALS:
+        logging.info(f"Using credentials from file: {Config.GOOGLE_APPLICATION_CREDENTIALS}")
         return service_account.Credentials.from_service_account_file(
             Config.GOOGLE_APPLICATION_CREDENTIALS,
-            scopes=[
-                'https://www.googleapis.com/auth/cloud-platform',
-                'https://www.googleapis.com/auth/spreadsheets.readonly'
-            ] # Broad scope for all services
+            scopes=scopes
         )
-    return None # In GCP, this will be None, and clients will use ADC.
+    
+    # In GCP, fetch credentials from Secret Manager
+    if Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID:
+        try:
+            logging.info(f"Fetching Sheets credentials from Secret Manager, secret_id: {Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID}")
+            creds_json_str = get_secret(Config.PROJECT_ID, Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID)
+            creds_info = json.loads(creds_json_str)
+            return service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
+        except Exception as e:
+            logging.error(f"Failed to load credentials from Secret Manager: {e}", exc_info=True)
+            return None
+
+    # Fallback to Application Default Credentials (ADC) if no specific credentials are provided
+    logging.warning("No explicit credentials provided. Falling back to Application Default Credentials for Sheets API.")
+    return None
 
 # --- Clients ---
-credentials = get_gcp_credentials()
-
-# Initialize clients with explicit credentials for local testing
-if Config.DATASTORE_EMULATOR_HOST:
-    db = datastore.Client(project=Config.PROJECT_ID)
-else:
-    db = datastore.Client(project=Config.PROJECT_ID, credentials=credentials)
-
-tasks_client = tasks_v2.CloudTasksClient(credentials=credentials)
+# For Firestore and Cloud Tasks, we can rely on Application Default Credentials (ADC) in GCP.
+# For local development, GOOGLE_APPLICATION_CREDENTIALS should be set, which ADC will pick up.
+db = datastore.Client(project=Config.PROJECT_ID)
+tasks_client = tasks_v2.CloudTasksClient()
 
 # Configure logging at the module level
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -131,7 +151,7 @@ def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = Tr
             }
 
 
-def create_unique_id_by_category(data: list[dict], category: str) -> str:
+def create_unique_id_by_category(data: list[dict], category: str, row_number: int) -> str:
     """Creates a unique task ID based on the category and a unique identifier from the data."""
     workflow_id = Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(category)
     passage_group_id = find_data_by_name(data, "passageGroupId")
@@ -160,9 +180,13 @@ def main(request: dict):
     and creates tasks in Cloud Tasks for processing.
     """
     try:
-        # Get credentials. This will be None in GCP, which is expected.
+        # Get credentials for Sheets API.
         creds = get_gcp_credentials()
-        
+        if not creds:
+            # If running in GCP, the runtime service account might have direct access.
+            # Let's try with ADC by passing None.
+            logging.warning("Could not build credentials explicitly. Proceeding with Application Default Credentials.")
+
         # Build the sheets service with the credentials
         sheets_service = get_sheets_service(creds)
         data_stream = stream_structured_sheet_data(

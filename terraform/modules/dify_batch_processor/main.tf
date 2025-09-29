@@ -79,12 +79,7 @@ resource "google_cloudfunctions2_function" "loader" {
       PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
       PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
       DIFY_API_ENDPOINT    = var.dify_api_endpoint
-    }
-    secret_environment_variables {
-      key        = "GOOGLE_SHEETS_CREDENTIALS"
-      project_id = var.project_id
-      secret     = var.google_sheets_credentials_secret_id
-      version    = "latest"
+      GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
     }
   }
 }

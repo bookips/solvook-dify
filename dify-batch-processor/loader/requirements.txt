@@ -1,6 +1,7 @@
 # Google Cloud
 google-cloud-firestore
 google-cloud-tasks
+google-cloud-secret-manager
 
 # Google API
 google-api-python-client
