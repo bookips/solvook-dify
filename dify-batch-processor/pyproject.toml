@@ -15,7 +15,8 @@ dependencies = [
     "google-auth-oauthlib (>=1.2.2,<2.0.0)",
     "requests (>=2.32.5,<3.0.0)",
     "functions-framework (>=3.9.2,<4.0.0)",
-    "python-dotenv (>=1.0.0,<2.0.0)"
+    "python-dotenv (>=1.0.0,<2.0.0)",
+    "google-cloud-secret-manager (>=2.24.0,<3.0.0)"
 ]
 
 
