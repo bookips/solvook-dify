@@ -42,7 +42,8 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 def save_to_datastore(unique_id: str, status: str, result: dict | None = None, message: str | None = None):
     """Helper function to save status updates to Datastore."""
     key = db.key(Config.FIRESTORE_COLLECTION, unique_id)
-    entity = datastore.Entity(key=key)
+    # Exclude 'result' and 'message' from indexing to avoid 1500 byte limit.
+    entity = datastore.Entity(key=key, exclude_from_indexes=('result', 'message'))
 
     entity.update({
         'status': status,
