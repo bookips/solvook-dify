@@ -10,6 +10,11 @@ resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
     max_backoff        = "3600s"
     max_doublings      = 2
   }
+
+  rate_limits {
+    max_dispatches_per_second = 1
+    max_concurrent_dispatches = 3
+  }
 }
 
 # --- GCS Buckets for Cloud Functions Source ---

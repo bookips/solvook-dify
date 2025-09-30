@@ -60,12 +60,12 @@ resource "google_sql_database_instance" "postgres_instance" {
     }
 
     pricing_plan = "PER_USE"
-    tier         = "db-f1-micro"
+    tier         = "db-g1-small"
     edition      = "ENTERPRISE"
 
     database_flags {
       name  = "max_connections"
-      value = "500"
+      value = "150"
     }
   }
 }

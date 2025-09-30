@@ -6,6 +6,34 @@
 
 ## 2. 아키텍처
 
+### 2.1. 시스템 아키텍처 다이어그램
+
+```mermaid
+graph TD
+    subgraph "Google Cloud Platform"
+        Scheduler[Cloud Scheduler] -->|Trigger| Loader(Cloud Run<br/>Loader)
+        Loader -->|1. Read Data| GSheets[Google Sheets]
+        Loader -->|2. Check Status| Firestore[(Firestore<br/>Datastore Mode)]
+        Loader -->|3. Create Task| Tasks(Cloud Tasks)
+        Tasks -->|4. Distribute Tasks| Worker(Cloud Run<br/>Worker)
+        Worker -->|6. Update Status| Firestore
+    end
+
+    subgraph "External Service"
+        Worker -->|5. Execute Workflow| Dify[Dify API]
+    end
+
+    style Scheduler fill:#f9f,stroke:#333,stroke-width:2px
+    style Loader fill:#bbf,stroke:#333,stroke-width:2px
+    style Worker fill:#bbf,stroke:#333,stroke-width:2px
+    style Tasks fill:#f9f,stroke:#333,stroke-width:2px
+    style Firestore fill:#fb5,stroke:#333,stroke-width:2px
+    style GSheets fill:#5f5,stroke:#333,stroke-width:2px
+    style Dify fill:#f55,stroke:#333,stroke-width:2px
+```
+
+### 2.2. 구성 요소 및 워크플로우
+
 Terraform으로 배포되는 `loader`와 `worker`는 Cloud Functions (2nd gen) 리소스로 정의되어 있지만, **내부적으로 Cloud Run 서비스로 실행됩니다.** 이는 Cloud Functions (2nd gen)이 Cloud Run의 강력한 기능과 확장성을 기반으로 하기 때문입니다.
 
 -   **Cloud Scheduler**: 주기적으로 `Loader` Cloud Run 서비스를 트리거합니다.

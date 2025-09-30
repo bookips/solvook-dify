@@ -216,7 +216,7 @@ def main(request: dict):
                 isNew = each == "워크북" and status == "SUCCESS"
                 input_data = to_dify_inputs_by_category(structured_row, each, isNew)
 
-                if status != 'SUCCESS' or isNew:
+                if status != 'SUCCESS':
                     task_id = f"{unique_id}_{int(datetime.now().timestamp())}"
                     create_cloud_task(input_data, task_id)
                     tasks_created_count += 1

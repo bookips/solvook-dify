@@ -132,6 +132,12 @@ def main(request: dict):
 
         # 3. Update Datastore with the result
         dify_result = response.json()
+        if dify_result.get("data").get("status") == "failed":
+            error_message = dify_result.get("data").get("error", "Unknown error")
+            logging.error(f"Dify API processing failed for ID {task_payload.unique_id}: {error_message}")
+            save_to_datastore(task_payload.unique_id, 'FAILED', message=error_message)
+            return "Dify API processing failed", 500
+
         save_to_datastore(task_payload.unique_id, 'SUCCESS', result=dify_result)
 
         logging.info(f"Successfully processed ID: {task_payload.unique_id}")

@@ -17,6 +17,8 @@ locals {
     "DB_PASSWORD"                                = data.google_secret_manager_secret_version.db_password.secret_data
     "DB_HOST"                                    = module.cloudsql.cloudsql_internal_ip
     "DB_PORT"                                    = var.db_port
+    "SQLALCHEMY_POOL_SIZE"                       = "50"
+    "SQLALCHEMY_POOL_RECYCLE"                    = "3600"        
     "STORAGE_TYPE"                               = var.storage_type
     "GOOGLE_STORAGE_BUCKET_NAME"                 = module.storage.storage_bucket_name
     "GOOGLE_STORAGE_SERVICE_ACCOUNT_JSON_BASE64" = module.storage.storage_admin_key_base64
