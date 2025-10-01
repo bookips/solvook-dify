@@ -89,23 +89,24 @@ google_sheets_credentials_secret_id = "dify-batch-processor-credentials"
 ```
 
 ### 3.3. 병렬 실행 설정 (Concurrency)
-Worker 서비스의 동시 실행 인스턴스 수는 Dify API 서버의 부하를 관리하는 데 매우 중요합니다. 이 설정은 Terraform의 Cloud Tasks 큐 리소스에서 관리할 수 있습니다.
+Worker 서비스의 동시 실행 인스턴스 수는 Dify API 서버의 부하를 관리하는 데 매우 중요합니다. 이 설정은 Terraform의 Cloud Tasks 큐 리소스에 기본적으로 포함되어 있습니다.
 
 **파일**: `terraform/modules/dify_batch_processor/main.tf`
 **리소스**: `google_cloud_tasks_queue`
 
-`rate_limits` 블록을 추가하여 동시에 실행될 Worker 서비스의 최대 인스턴스 수를 제어할 수 있습니다. 예를 들어, 최대 5개로 제한하려면 아래와 같이 수정합니다.
+`rate_limits` 블록은 동시에 실행될 Worker 서비스의 최대 인스턴스 수와 초당 최대 작업 전달 수를 제어합니다. 기본 설정은 다음과 같습니다.
 
 ```terraform
 resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
   # ... existing configuration ...
 
   rate_limits {
-    max_concurrent_dispatches = 5
+    max_dispatches_per_second = 5
+    max_concurrent_dispatches = 10
   }
 }
 ```
-> **참고**: 현재 코드에는 `rate_limits` 블록이 설정되어 있지 않으므로, 필요에 따라 직접 추가해야 합니다.
+이 값을 조정하여 Dify API 서버의 부하를 세밀하게 제어할 수 있습니다.
 
 ### 3.4. Terraform 배포
 
@@ -130,13 +131,14 @@ resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
 
 ### 3.5. 모니터링
 
-Terraform 배포 시 `dify-batch-processor Monitoring Dashboard`라는 이름의 커스텀 대시보드가 자동으로 생성됩니다. GCP 콘솔의 **Monitoring > Dashboards** 메뉴에서 해당 대시보드를 찾아 아래와 같은 지표를 실시간으로 확인할 수 있습니다.
+Terraform 배포 시 `${var.name_prefix} Monitoring Dashboard`라는 이름의 커스텀 대시보드가 자동으로 생성됩니다. GCP 콘솔의 **Monitoring > Dashboards** 메뉴에서 해당 대시보드를 찾아 아래와 같은 지표를 실시간으로 확인할 수 있습니다.
 
--   **Loader/Worker 서비스 실행 횟수**: 각 서비스의 시간당 실행 횟수
--   **Loader/Worker 서비스 CPU, Memory 지표**: 각 서비스의 CPU, Memory  지표
--   **Worker 서비스 실행 시간 (p50)**: Worker 서비스의 50 percentile 실행 시간
--   **Cloud Tasks 큐 깊이**: 처리 대기 중인 태스크의 수
--   **서비스 에러 로그**: `loader` 및 `worker` 서비스에서 발생한 심각도 `ERROR` 수준의 로그
+-   **Loader/Worker Service Invocations**: 각 서비스의 시간당 실행 횟수
+-   **Container Instance Count**: `loader` 및 `worker` 서비스의 실행 인스턴스 수
+-   **Container CPU/Memory Utilization**: 각 서비스의 CPU 및 메모리 사용률
+-   **Worker Service Execution Time (p50)**: Worker 서비스의 50 percentile 실행 시간
+-   **Cloud Tasks Queue Depth**: 처리 대기 중인 태스크의 수
+-   **Service Errors (Logs)**: `loader` 및 `worker` 서비스에서 발생한 심각도 `ERROR` 수준의 로그
 
 ## 4. 로컬 개발 및 테스트 (Makefile 사용)
 
