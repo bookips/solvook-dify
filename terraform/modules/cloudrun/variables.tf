@@ -86,12 +86,14 @@ variable "max_instance_count" {
   type = number
 }
 
-variable "slack_webhook_secret_name" {
-  type        = string
-  description = "The name of the secret in Google Secret Manager holding the Slack webhook URL."
-}
-
 variable "slack_channel_name" {
   type        = string
   description = "The Slack channel name to send monitoring alerts to (e.g., #dify-alerts)."
+}
+
+variable "slack_webhook_token" {
+  type        = string
+  description = "The Slack webhook token."
+  sensitive   = true
+  default     = null
 }

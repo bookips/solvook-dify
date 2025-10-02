@@ -195,3 +195,48 @@ resource "google_monitoring_dashboard" "dify_batch_processor_dashboard" {
     }
   })
 }
+
+# --- Slack Alerting ---
+
+resource "google_monitoring_notification_channel" "slack" {
+  count        = var.slack_webhook_secret_name != null && var.slack_channel_name != null ? 1 : 0
+  project      = var.project_id
+  display_name = "Slack Notification Channel"
+  type         = "slack"
+  labels = {
+    channel_name = var.slack_channel_name
+  }
+  sensitive_labels {
+    auth_token = var.slack_webhook_token
+  }
+}
+
+resource "google_monitoring_alert_policy" "worker_5xx_errors" {
+  count        = var.slack_webhook_secret_name != null && var.slack_channel_name != null ? 1 : 0
+  project      = var.project_id
+  display_name = "${var.name_prefix}-worker 5xx Errors"
+  combiner     = "OR"
+  conditions {
+    display_name = "Cloud Run service ${google_cloudfunctions2_function.worker.name} has 5xx errors"
+    condition_threshold {
+      filter          = "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloudfunctions2_function.worker.name}\" metric.label.response_code_class=\"5xx\""
+      duration        = "300s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      trigger {
+        count = 1
+      }
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_RATE"
+      }
+    }
+  }
+  notification_channels = [
+    google_monitoring_notification_channel.slack[0].name
+  ]
+  user_labels = {
+    "service" = "${var.name_prefix}-worker"
+    "tier"    = "backend"
+  }
+}

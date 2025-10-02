@@ -438,35 +438,33 @@ resource "google_cloud_run_v2_service" "dify_sandbox" {
     }
   }
 }
-data "google_secret_manager_secret_version" "slack_webhook" {
-  project = var.project_id
-  secret  = var.slack_webhook_secret_name
-}
+# --- Slack Alerting ---
 
 resource "google_monitoring_notification_channel" "slack" {
-  display_name = "Slack"
+  count        = var.slack_webhook_token != null && var.slack_channel_name != null ? 1 : 0
+  project      = var.project_id
+  display_name = "Slack Notification Channel"
   type         = "slack"
   labels = {
     channel_name = var.slack_channel_name
   }
   sensitive_labels {
-    auth_token = data.google_secret_manager_secret_version.slack_webhook.secret_data
+    auth_token = var.slack_webhook_token
   }
 }
 
 resource "google_monitoring_alert_policy" "dify_service_5xx_errors" {
-  display_name = "Dify Service - High 5xx Error Rate"
+  count        = var.slack_webhook_token != null && var.slack_channel_name != null ? 1 : 0
+  project      = var.project_id
+  display_name = "Dify Service 5xx Errors"
   combiner     = "OR"
-  notification_channels = [
-    google_monitoring_notification_channel.slack.name
-  ]
   conditions {
-    display_name = "High 5xx Error Rate"
+    display_name = "Cloud Run service ${google_cloud_run_v2_service.dify_service.name} has 5xx errors"
     condition_threshold {
-      filter     = "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"${google_cloud_run_v2_service.dify_service.name}\" metric.label.\"response_code_class\"=\"5xx\""
-      duration   = "300s"
-      comparison = "COMPARISON_GT"
-      threshold_value = 5
+      filter          = "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.service_name=\"${google_cloud_run_v2_service.dify_service.name}\" metric.label.response_code_class=\"5xx\""
+      duration        = "300s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
       trigger {
         count = 1
       }
@@ -475,6 +473,13 @@ resource "google_monitoring_alert_policy" "dify_service_5xx_errors" {
         per_series_aligner = "ALIGN_RATE"
       }
     }
+  }
+  notification_channels = [
+    google_monitoring_notification_channel.slack[0].name
+  ]
+  user_labels = {
+    "service" = "dify-api"
+    "tier"    = "backend"
   }
 }
 

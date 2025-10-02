@@ -212,22 +212,37 @@ def main(request: dict):
                 each = each.strip()
                 unique_id = create_unique_id_by_category(structured_row, each, row_number)
 
-                status = get_task_status(unique_id)
-                isNew = each == "워크북" and status == "SUCCESS"
-                input_data = to_dify_inputs_by_category(structured_row, each, isNew)
+                task_creation_needed = False
+                with db.transaction():
+                    key = db.key(Config.FIRESTORE_COLLECTION, unique_id)
+                    entity = db.get(key)
+                    status = entity.get("status") if entity else None
 
-                if status != 'SUCCESS':
+                    # Only create a task if it's new (no status) or has failed.
+                    # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.
+                    if status is None or status == 'FAILED':
+                        if not entity:
+                            entity = datastore.Entity(key=key)
+                        entity.update({
+                            'status': 'PENDING',
+                            'timestamp': datetime.now()
+                        })
+                        db.put(entity)
+                        task_creation_needed = True
+                    else:
+                        logging.info(f"Skipping task creation for ID {unique_id} because its status is '{status}'.")
+
+                if task_creation_needed:
+                    # The original `isNew` logic would re-trigger successful workbooks,
+                    # which contradicts the goal of preventing duplicates.
+                    isNew = each == "워크북" and status == "SUCCESS"
+                    input_data = to_dify_inputs_by_category(structured_row, each, isNew)
+
+                    # Create a unique task name with a timestamp to avoid Cloud Tasks' deduplication,
+                    # as our transaction now handles the idempotency.
                     task_id = f"{unique_id}_{int(datetime.now().timestamp())}"
                     create_cloud_task(input_data, task_id)
                     tasks_created_count += 1
-
-                    key = db.key(Config.FIRESTORE_COLLECTION, unique_id)
-                    entity = datastore.Entity(key=key)
-                    entity.update({
-                        'status': 'PENDING',
-                        'timestamp': datetime.now()
-                    })
-                    db.put(entity)
 
         if processed_rows == 0:
             logging.info("No data found in Google Sheets that matches the filter.")

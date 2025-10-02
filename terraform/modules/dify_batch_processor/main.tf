@@ -43,7 +43,6 @@ resource "google_storage_bucket" "worker_bucket" {
 resource "null_resource" "loader_source_hash" {
   triggers = {
     # Create a single hash representing the state of all source files.
-    # This trigger will change if any file is added, removed, or modified.
     source_code_hash = md5(jsonencode({
       for f in fileset("${path.module}/../../../dify-batch-processor/loader", "**") :
       f => filemd5("${path.module}/../../../dify-batch-processor/loader/${f}")
@@ -152,7 +151,7 @@ resource "google_cloudfunctions2_function" "worker" {
     max_instance_count = 10 # Set a reasonable upper limit
     min_instance_count = 0
     available_memory   = "256Mi"
-    timeout_seconds    = 300 # 5 minutes for Dify API call
+    timeout_seconds    = 630 # 10.5 minutes, longer than Dify API timeout
     service_account_email = var.function_service_account_email
     environment_variables = {
       GCP_PROJECT_ID             = var.project_id

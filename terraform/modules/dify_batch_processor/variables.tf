@@ -1,15 +1,15 @@
 variable "project_id" {
-  description = "The ID of the Google Cloud project."
+  description = "The GCP project ID."
   type        = string
 }
 
 variable "location" {
-  description = "The Google Cloud region for the resources."
+  description = "The GCP location (region) for the resources."
   type        = string
 }
 
 variable "name_prefix" {
-  description = "A prefix to be added to resource names."
+  description = "A prefix to apply to resource names."
   type        = string
   default     = "dify-batch-processor"
 }
@@ -33,7 +33,7 @@ variable "sheet_name" {
 variable "unique_id_column" {
   description = "The column index (0-based) or 'ROW_NUMBER' to use as a unique ID."
   type        = string
-  default     = "0"
+  default     = "id"
 }
 
 variable "dify_api_endpoint" {
@@ -49,7 +49,7 @@ variable "dify_api_key_secret_id" {
 variable "dify_api_timeout_minutes" {
   description = "The timeout in minutes for the Dify API call in the worker function."
   type        = number
-  default     = 5
+  default     = 10
 }
 
 variable "google_sheets_credentials_secret_id" {
@@ -58,16 +58,35 @@ variable "google_sheets_credentials_secret_id" {
 }
 
 variable "function_service_account_email" {
-  description = "The email of the service account to run the Cloud Functions."
+  description = "The email of the service account for the Cloud Functions."
   type        = string
 }
 
 variable "passage_analysis_workflow_id" {
-  description = ""
+  description = "The workflow ID for passage analysis."
   type        = string
 }
 
 variable "passage_workbook_workflow_id" {
-  description = ""
+  description = "The workflow ID for passage workbook creation."
   type        = string
+}
+
+variable "slack_webhook_secret_name" {
+  type        = string
+  description = "The name of the secret for the Slack webhook URL."
+  default     = null
+}
+
+variable "slack_channel_name" {
+  type        = string
+  description = "The name of the Slack channel to send notifications to."
+  default     = null
+}
+
+variable "slack_webhook_token" {
+  type        = string
+  description = "The Slack webhook token."
+  sensitive   = true
+  default     = null
 }

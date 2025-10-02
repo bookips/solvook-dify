@@ -18,7 +18,7 @@ locals {
     "DB_HOST"                                    = module.cloudsql.cloudsql_internal_ip
     "DB_PORT"                                    = var.db_port
     "SQLALCHEMY_POOL_SIZE"                       = "50"
-    "SQLALCHEMY_POOL_RECYCLE"                    = "3600"        
+    "SQLALCHEMY_POOL_RECYCLE"                    = "3600"
     "STORAGE_TYPE"                               = var.storage_type
     "GOOGLE_STORAGE_BUCKET_NAME"                 = module.storage.storage_bucket_name
     "GOOGLE_STORAGE_SERVICE_ACCOUNT_JSON_BASE64" = module.storage.storage_admin_key_base64
@@ -78,6 +78,12 @@ data "google_secret_manager_secret_version" "plugin_dify_inner_api_key" {
   secret  = var.plugin_dify_inner_api_key_secret_name
 }
 
+data "google_secret_manager_secret_version" "slack_webhook" {
+  count   = var.slack_webhook_secret_name != null ? 1 : 0
+  project = var.project_id
+  secret  = var.slack_webhook_secret_name
+}
+
 data "google_compute_network" "default" {
   name = "default"
 }
@@ -112,8 +118,8 @@ module "cloudrun" {
   shared_env_vars             = local.shared_env_vars
   min_instance_count          = var.min_instance_count
   max_instance_count          = var.max_instance_count
-  slack_webhook_secret_name   = var.slack_webhook_secret_name
   slack_channel_name          = var.slack_channel_name
+  slack_webhook_token         = var.slack_webhook_secret_name != null ? data.google_secret_manager_secret_version.slack_webhook[0].secret_data : null
 
   depends_on = [google_project_service.enabled_services]
 }
@@ -241,6 +247,8 @@ module "dify_batch_processor" {
   function_service_account_email      = google_service_account.dify_batch_processor_sa.email
   passage_analysis_workflow_id        = var.passage_analysis_workflow_id
   passage_workbook_workflow_id        = var.passage_workbook_workflow_id
+  slack_channel_name                  = var.slack_channel_name
+  slack_webhook_token                 = var.slack_webhook_secret_name != null ? data.google_secret_manager_secret_version.slack_webhook[0].secret_data : null
 
   depends_on = [
     google_project_service.enabled_services,
