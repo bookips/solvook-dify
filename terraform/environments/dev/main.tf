@@ -268,7 +268,7 @@ resource "google_cloud_scheduler_job" "dify_batch_processor_trigger" {
 
   http_target {
     uri = module.dify_batch_processor.loader_service_uri
-    http_method = "GET"
+    http_method = "POST"
 
     oidc_token {
       service_account_email = google_service_account.dify_batch_processor_sa.email

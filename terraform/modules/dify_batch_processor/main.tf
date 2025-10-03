@@ -22,52 +22,116 @@ resource "google_storage_bucket" "loader_bucket" {
   project       = var.project_id
   name          = "dify-batch-processor-loader"
   location      = var.location
-  force_destroy = true # Set to true for easier cleanup in dev environments
+  force_destroy = true
 }
 
 resource "google_storage_bucket" "worker_bucket" {
   project       = var.project_id
   name          = "dify-batch-processor-worker"
   location      = var.location
-  force_destroy = true # Set to true for easier cleanup in dev environments
+  force_destroy = true
 }
 
-# --- Cloud Functions (2nd Gen) - Deployed as Cloud Run Services ---
-# Cloud Functions (2nd gen) is built on top of Cloud Run and Eventarc.
-# The following resources define two functions that are automatically deployed as Cloud Run services.
-
-# 1. Data Loader Service (triggered by HTTP)
-
-# Create a hash of the source directory's contents.
-# This will change whenever a file is modified, triggering a new archive to be created.
-resource "null_resource" "loader_source_hash" {
-  triggers = {
-    # Create a single hash representing the state of all source files.
-    source_code_hash = md5(jsonencode({
-      for f in fileset("${path.module}/../../../dify-batch-processor/loader", "**") :
-      f => filemd5("${path.module}/../../../dify-batch-processor/loader/${f}")
-    }))
-  }
+resource "google_storage_bucket" "poller_bucket" {
+  project       = var.project_id
+  name          = "dify-batch-processor-poller"
+  location      = var.location
+  force_destroy = true
 }
 
+# --- Source Code Archiving ---
+
+# 1. Loader Source
 data "archive_file" "loader_source" {
   type        = "zip"
   source_dir  = "${path.module}/../../../dify-batch-processor/loader"
-  output_path = "/tmp/loader_source_${null_resource.loader_source_hash.id}.zip"
+  output_path = "/tmp/loader_source.zip"
 }
 
 resource "google_storage_bucket_object" "loader_source_object" {
-  name   = "source/dify-loader-source-${null_resource.loader_source_hash.id}.zip"
+  name   = "source/loader-source-${data.archive_file.loader_source.output_md5}.zip"
   bucket = google_storage_bucket.loader_bucket.name
   source = data.archive_file.loader_source.output_path
 }
 
-# This resource defines a 2nd gen Cloud Function, which is deployed as a Cloud Run service.
+# 2. Worker Source
+data "archive_file" "worker_source" {
+  type        = "zip"
+  output_path = "/tmp/worker_source.zip"
+
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/worker/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/worker/config.py")
+    filename = "config.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/worker/requirements.txt")
+    filename = "requirements.txt"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/__init__.py")
+    filename = "shared/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/utils.py")
+    filename = "shared/utils.py"
+  }
+}
+
+resource "google_storage_bucket_object" "worker_source_object" {
+  name   = "source/worker-source-${data.archive_file.worker_source.output_md5}.zip"
+  bucket = google_storage_bucket.worker_bucket.name
+  source = data.archive_file.worker_source.output_path
+}
+
+# 3. Poller Source
+data "archive_file" "poller_source" {
+  type        = "zip"
+  output_path = "/tmp/poller_source.zip"
+
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/poller/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/poller/config.py")
+    filename = "config.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/poller/requirements.txt")
+    filename = "requirements.txt"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/__init__.py")
+    filename = "shared/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/utils.py")
+    filename = "shared/utils.py"
+  }
+}
+
+resource "google_storage_bucket_object" "poller_source_object" {
+  name   = "source/poller-source-${data.archive_file.poller_source.output_md5}.zip"
+  bucket = google_storage_bucket.poller_bucket.name
+  source = data.archive_file.poller_source.output_path
+}
+
+
+# --- Cloud Functions (2nd Gen) ---
+
+# 1. Data Loader Service
 resource "google_cloudfunctions2_function" "loader" {
-  project  = var.project_id
-  location = var.location
-  name     = "${var.name_prefix}-loader"
+  project     = var.project_id
+  location    = var.location
+  name        = "${var.name_prefix}-loader"
   description = "Data Loader Service"
+  labels = {
+    "source-generation" = google_storage_bucket_object.loader_source_object.generation
+  }
 
   build_config {
     runtime     = "python313"
@@ -81,60 +145,37 @@ resource "google_cloudfunctions2_function" "loader" {
   }
 
   service_config {
-    max_instance_count = 5
-    min_instance_count = 0
-    available_memory   = "256Mi"
-    timeout_seconds    = 60
+    max_instance_count    = 5
+    min_instance_count    = 0
+    available_memory      = "256Mi"
+    timeout_seconds       = 60
     service_account_email = var.function_service_account_email
     environment_variables = {
-      GCP_PROJECT_ID       = var.project_id
-      GCP_LOCATION         = var.location
-      SPREADSHEET_ID       = var.spreadsheet_id
-      SHEET_NAME           = var.sheet_name
-      UNIQUE_ID_COLUMN     = var.unique_id_column
-      QUEUE_NAME           = google_cloud_tasks_queue.dify_batch_processor_queue.name
-      WORKER_URL           = google_cloudfunctions2_function.worker.service_config[0].uri
-      FIRESTORE_COLLECTION = var.firestore_collection
-      PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
-      PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
-      DIFY_API_ENDPOINT    = var.dify_api_endpoint
+      GCP_PROJECT_ID                      = var.project_id
+      GCP_LOCATION                        = var.location
+      SPREADSHEET_ID                      = var.spreadsheet_id
+      SHEET_NAME                          = var.sheet_name
+      UNIQUE_ID_COLUMN                    = var.unique_id_column
+      QUEUE_NAME                          = google_cloud_tasks_queue.dify_batch_processor_queue.name
+      WORKER_URL                          = google_cloudfunctions2_function.worker.service_config[0].uri
+      FIRESTORE_COLLECTION                = var.firestore_collection
+      PASSAGE_ANALYSIS_WORKFLOW_ID        = var.passage_analysis_workflow_id
+      PASSAGE_WORKBOOK_WORKFLOW_ID        = var.passage_workbook_workflow_id
+      DIFY_API_ENDPOINT                   = var.dify_api_endpoint
       GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
       FUNCTION_SERVICE_ACCOUNT_EMAIL      = var.function_service_account_email
     }
   }
 }
-
-# 2. Dify Worker Service (triggered by Cloud Tasks)
-
-# Create a hash of the source directory's contents for the worker.
-resource "null_resource" "worker_source_hash" {
-  triggers = {
-    # Create a single hash representing the state of all source files.
-    source_code_hash = md5(jsonencode({
-      for f in fileset("${path.module}/../../../dify-batch-processor/worker", "**") :
-      f => filemd5("${path.module}/../../../dify-batch-processor/worker/${f}")
-    }))
-  }
-}
-
-data "archive_file" "worker_source" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../../dify-batch-processor/worker"
-  output_path = "/tmp/worker_source_${null_resource.worker_source_hash.id}.zip"
-}
-
-resource "google_storage_bucket_object" "worker_source_object" {
-  name   = "source/dify-worker-source-${null_resource.worker_source_hash.id}.zip"
-  bucket = google_storage_bucket.worker_bucket.name
-  source = data.archive_file.worker_source.output_path
-}
-
-# This resource defines a 2nd gen Cloud Function, which is deployed as a Cloud Run service.
+# 2. Dify Worker Service
 resource "google_cloudfunctions2_function" "worker" {
-  project  = var.project_id
-  location = var.location
-  name     = "${var.name_prefix}-worker"
+  project     = var.project_id
+  location    = var.location
+  name        = "${var.name_prefix}-worker"
   description = "Dify Worker Service"
+  labels = {
+    "source-generation" = google_storage_bucket_object.worker_source_object.generation
+  }
 
   build_config {
     runtime     = "python313"
@@ -148,17 +189,71 @@ resource "google_cloudfunctions2_function" "worker" {
   }
 
   service_config {
-    max_instance_count = 10 # Set a reasonable upper limit
-    min_instance_count = 0
-    available_memory   = "256Mi"
-    timeout_seconds    = 630 # 10.5 minutes, longer than Dify API timeout
+    max_instance_count    = 10
+    min_instance_count    = 0
+    available_memory      = "256Mi"
+    timeout_seconds       = 630
     service_account_email = var.function_service_account_email
     environment_variables = {
-      GCP_PROJECT_ID             = var.project_id
-      DIFY_API_ENDPOINT          = var.dify_api_endpoint
-      FIRESTORE_COLLECTION       = var.firestore_collection
-      DIFY_API_TIMEOUT_MINUTES   = var.dify_api_timeout_minutes
-      DIFY_API_KEY_SECRET_ID     = var.dify_api_key_secret_id
+      GCP_PROJECT_ID           = var.project_id
+      DIFY_API_ENDPOINT        = var.dify_api_endpoint
+      FIRESTORE_COLLECTION     = var.firestore_collection
+      DIFY_API_TIMEOUT_MINUTES = var.dify_api_timeout_minutes
+      DIFY_API_KEY_SECRET_ID   = var.dify_api_key_secret_id
+    }
+  }
+}
+
+# 3. Dify Poller Service
+resource "google_cloudfunctions2_function" "poller" {
+  project     = var.project_id
+  location    = var.location
+  name        = "${var.name_prefix}-poller"
+  description = "Polls Dify for workflow status."
+  labels = {
+    "source-generation" = google_storage_bucket_object.poller_source_object.generation
+  }
+
+  build_config {
+    runtime     = "python313"
+    entry_point = "main"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.poller_bucket.name
+        object = google_storage_bucket_object.poller_source_object.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count    = 1
+    min_instance_count    = 0
+    available_memory      = "256Mi"
+    timeout_seconds       = 300
+    service_account_email = var.function_service_account_email
+    environment_variables = {
+      GCP_PROJECT_ID         = var.project_id
+      FIRESTORE_COLLECTION   = var.firestore_collection
+      DIFY_API_ENDPOINT      = var.dify_api_endpoint
+      DIFY_API_KEY_SECRET_ID = var.dify_api_key_secret_id
+    }
+  }
+}
+
+# 4. Cloud Scheduler to trigger the Poller
+
+resource "google_cloud_scheduler_job" "poller_scheduler" {
+  project   = var.project_id
+  region    = var.location
+  name      = "${var.name_prefix}-poller-scheduler"
+  schedule  = "*/3 * * * *" # Every 3 minutes
+  time_zone = "Etc/UTC"
+
+  http_target {
+    uri = google_cloudfunctions2_function.poller.service_config[0].uri
+    http_method = "POST"
+    oidc_token {
+      service_account_email = var.function_service_account_email
     }
   }
 }
@@ -189,5 +284,14 @@ resource "google_cloud_run_v2_service_iam_member" "worker_invoker" {
   location = var.location
   name     = google_cloudfunctions2_function.worker.name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:${var.function_service_account_email}" # Assuming Cloud Tasks uses the same SA
+  member   = "serviceAccount:${var.function_service_account_email}"
+}
+
+# Allow Cloud Scheduler to invoke the Poller Cloud Run service
+resource "google_cloud_run_v2_service_iam_member" "poller_invoker" {
+  project  = var.project_id
+  location = var.location
+  name     = google_cloudfunctions2_function.poller.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${var.function_service_account_email}"
 }

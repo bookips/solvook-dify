@@ -1,8 +1,10 @@
-# Dify WORKFLOW BATCH PROCESSOR SYSTEM
+# Dify Workflow Batch Processor System
 
 ## 1. 개요
 
-이 시스템은 Google Sheets에 저장된 데이터를 읽어 Dify LLM 워크플로우를 병렬로 실행하고, 그 결과를 안정적으로 처리하기 위해 설계되었습니다. **Cloud Run (Cloud Functions 2nd gen 기반)**, Cloud Tasks, **Firestore (Datastore Mode)**를 사용하여 효율적이고 안정적인 데이터 처리를 보장합니다.
+이 시스템은 Google Sheets에 저장된 데이터를 읽어 Dify LLM 워크플로우를 병렬로 실행하고, 그 결과를 안정적으로 처리하기 위해 설계되었습니다. **비동기 폴링(Polling) 아키텍처**를 채택하여 장시간 소요되는 Dify 워크플로우를 타임아웃 문제 없이 안정적으로 처리합니다.
+
+시스템은 **`loader`**, **`worker`**, **`poller`** 세 개의 핵심 서비스로 구성되며, **Cloud Run (Cloud Functions 2nd gen 기반)**, Cloud Tasks, **Firestore (Datastore Mode)**, Cloud Scheduler를 사용하여 효율적이고 안정적인 데이터 처리를 보장합니다.
 
 ## 2. 아키텍처
 
@@ -11,21 +13,30 @@
 ```mermaid
 graph TD
     subgraph "Google Cloud Platform"
-        Scheduler[Cloud Scheduler] -->|Trigger| Loader(Cloud Run<br/>Loader)
-        Loader -->|1. Read Data| GSheets[Google Sheets]
-        Loader -->|2. Check Status| Firestore[(Firestore<br/>Datastore Mode)]
-        Loader -->|3. Create Task| Tasks(Cloud Tasks)
-        Tasks -->|4. Distribute Tasks| Worker(Cloud Run<br/>Worker)
-        Worker -->|6. Update Status| Firestore
+        Scheduler[(Cloud Scheduler<br/>Loader Trigger)] -->|1. Trigger| Loader(Cloud Run<br/>Loader)
+        Loader -->|2. Read Data| GSheets[Google Sheets]
+        Loader -->|3. Check Status| Firestore[(Firestore<br/>Datastore Mode)]
+        Loader -->|4. Create Task| Tasks(Cloud Tasks)
+        
+        Tasks -->|5. Trigger| Worker(Cloud Run<br/>Worker)
+        Worker -->|7. Save run_id &<br/>Set 'PROCESSING'| Firestore
+
+        Scheduler2[(Cloud Scheduler<br/>Poller Trigger)] -->|8. Trigger| Poller(Cloud Run<br/>Poller)
+        Poller -->|9. Get 'PROCESSING' Jobs| Firestore
+        Poller -->|11. Update Final Status<br/>SUCCESS/FAILED| Firestore
     end
 
     subgraph "External Service"
-        Worker -->|5. Execute Workflow| Dify[Dify API]
+        Worker -->|6. Start Workflow<br/>async stream| Dify[Dify API]
+        Dify -->|6a. Return run_id| Worker
+        Poller -->|10. Check Status<br/>with run_id | Dify
     end
 
     style Scheduler fill:#f9f,stroke:#333,stroke-width:2px
+    style Scheduler2 fill:#f9f,stroke:#333,stroke-width:2px
     style Loader fill:#bbf,stroke:#333,stroke-width:2px
     style Worker fill:#bbf,stroke:#333,stroke-width:2px
+    style Poller fill:#bbf,stroke:#333,stroke-width:2px
     style Tasks fill:#f9f,stroke:#333,stroke-width:2px
     style Firestore fill:#fb5,stroke:#333,stroke-width:2px
     style GSheets fill:#5f5,stroke:#333,stroke-width:2px
@@ -34,13 +45,13 @@ graph TD
 
 ### 2.2. 구성 요소 및 워크플로우
 
-Terraform으로 배포되는 `loader`와 `worker`는 Cloud Functions (2nd gen) 리소스로 정의되어 있지만, **내부적으로 Cloud Run 서비스로 실행됩니다.** 이는 Cloud Functions (2nd gen)이 Cloud Run의 강력한 기능과 확장성을 기반으로 하기 때문입니다.
-
--   **Cloud Scheduler**: 주기적으로 `Loader` Cloud Run 서비스를 트리거합니다.
--   **Cloud Run (Loader)**: Google Sheets에서 데이터를 읽고, Firestore의 처리 상태를 확인하여 처리해야 할 데이터에 대한 태스크를 Cloud Tasks에 생성합니다.
+-   **Cloud Scheduler (Loader Trigger)**: 주기적으로 `Loader` 서비스를 트리거하여 전체 프로세스를 시작합니다.
+-   **Cloud Run (Loader)**: Google Sheets에서 데이터를 읽고, Firestore의 처리 상태를 확인하여 아직 처리되지 않은 데이터에 대한 태스크를 Cloud Tasks에 생성합니다.
 -   **Cloud Tasks**: `Loader`로부터 받은 태스크를 큐에 저장하고, `Worker`에게 분산하여 전달합니다. 실패 시 설정된 정책에 따라 자동으로 재시도합니다.
--   **Cloud Run (Worker)**: Cloud Tasks로부터 태스크를 받아 Dify API를 호출하여 실제 워크플로우를 실행하고, 결과를 Firestore에 업데이트합니다. **동시에 실행되는 Worker 인스턴스의 수는 Cloud Tasks 큐 설정으로 제어됩니다.**
--   **Firestore (Datastore Mode)**: 각 데이터의 처리 상태(`PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`)를 저장하고 관리합니다.
+-   **Cloud Run (Worker)**: Cloud Tasks로부터 태스크를 받아 Dify API를 **비동기 스트리밍 모드**로 호출하여 워크플로우 실행을 **시작**시키고, Dify로부터 받은 **`workflow_run_id`**를 Firestore에 `PROCESSING` 상태와 함께 저장한 후 **즉시 종료**됩니다. Worker는 더 이상 Dify 작업이 끝날 때까지 기다리지 않습니다.
+-   **Cloud Scheduler (Poller Trigger)**: **매분마다** `Poller` 서비스를 트리거합니다.
+-   **Cloud Run (Poller)**: 주기적으로 실행되어 Firestore에서 `PROCESSING` 상태인 작업을 조회합니다. 각 작업의 `workflow_run_id`를 사용하여 Dify API에 **작업 진행 상태를 문의(Polling)**하고, 작업이 완료(`succeeded` 또는 `failed`)되었으면 최종 결과를 Firestore에 업데이트합니다.
+-   **Firestore (Datastore Mode)**: 각 데이터의 처리 상태(`PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`)와 `workflow_run_id` 등 관련 데이터를 저장하고 관리합니다.
 
 ## 3. 설정 및 배포 (Terraform)
 
@@ -84,29 +95,17 @@ sheet_name                          = "Sheet1"
 unique_id_column                    = "0" # 또는 "ROW_NUMBER"
 dify_api_endpoint                   = "https://your-dify-api.example.com/v1/workflows/run"
 dify_api_key_secret_id              = "dify-api-key"
-dify_api_timeout_minutes            = 5 # Dify API 호출 타임아웃 (분)
+dify_api_timeout_minutes            = 10
 google_sheets_credentials_secret_id = "dify-batch-processor-credentials"
+passage_analysis_workflow_id        = "workflow-id-for-analysis"
+passage_workbook_workflow_id        = "workflow-id-for-workbook"
 ```
 
 ### 3.3. 병렬 실행 설정 (Concurrency)
-Worker 서비스의 동시 실행 인스턴스 수는 Dify API 서버의 부하를 관리하는 데 매우 중요합니다. 이 설정은 Terraform의 Cloud Tasks 큐 리소스에 기본적으로 포함되어 있습니다.
 
-**파일**: `terraform/modules/dify_batch_processor/main.tf`
-**리소스**: `google_cloud_tasks_queue`
+Worker 서비스의 동시 실행 인스턴스 수는 Dify API 서버의 부하를 관리하는 데 매우 중요합니다. 이 설정은 `terraform/modules/dify_batch_processor/main.tf`의 `google_cloud_tasks_queue` 리소스에서 제어됩니다.
 
-`rate_limits` 블록은 동시에 실행될 Worker 서비스의 최대 인스턴스 수와 초당 최대 작업 전달 수를 제어합니다. 기본 설정은 다음과 같습니다.
-
-```terraform
-resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
-  # ... existing configuration ...
-
-  rate_limits {
-    max_dispatches_per_second = 5
-    max_concurrent_dispatches = 10
-  }
-}
-```
-이 값을 조정하여 Dify API 서버의 부하를 세밀하게 제어할 수 있습니다.
+`poller` 서비스는 기본적으로 단일 인스턴스로 실행되도록 설정되어 있습니다.
 
 ### 3.4. Terraform 배포
 
@@ -142,7 +141,7 @@ Terraform 배포 시 `${var.name_prefix} Monitoring Dashboard`라는 이름의 �
 
 ## 4. 로컬 개발 및 테스트 (Makefile 사용)
 
-`loader`와 `worker` 함수를 로컬 환경에서 테스트할 수 있습니다. `Makefile`을 사용하여 복잡한 설정 및 실행 과정을 간소화했습니다. 로컬 테스트는 실제 GCP 서비스 대신 Firestore 에뮬레이터를 사용합니다.
+`loader`, `worker`, `poller` 함수를 로컬 환경에서 테스트할 수 있습니다. 로컬 테스트는 실제 GCP 서비스 대신 Firestore 에뮬레이터를 사용합니다.
 
 ### 4.1. 사전 준비 사항
 
@@ -170,62 +169,45 @@ Terraform 배포 시 `${var.name_prefix} Monitoring Dashboard`라는 이름의 �
 
 ### 4.3. 로컬 테스트 워크플로우
 
-테스트를 위해서는 최소 3개의 터미널 세션이 필요합니다. 모든 명령어는 `dify-batch-processor` 디렉터리에서 실행합니다.
+각 서비스를 독립적으로 테스트하기 위해 여러 개의 터미널 세션이 필요합니다. 모든 명령어는 `dify-batch-processor` 디렉터리에서 실행합니다.
 
 1.  **터미널 1: Firestore 에뮬레이터 실행**
-    Firestore 데이터베이스를 로컬에서 시뮬레이션하기 위해 에뮬레이터를 시작합니다.
     ```bash
     make run-emulator
     ```
-    > **참고**: 테스트가 끝나면 `make stop-emulator` 명령어로 에뮬레이터를 중지할 수 있습니다.
 
 2.  **터미널 2: Worker 실행**
-    `worker` 함수를 로컬 서버로 실행하여 HTTP 요청을 받을 준비를 합니다.
     ```bash
     make run-worker
     ```
 
-3.  **터미널 3: Worker 테스트**
-    실행 중인 `worker`에게 테스트용 `curl` 요청을 보내 정상적으로 작동하는지 확인합니다.
-    ```bash
-    make test-worker
-    ```
-    `worker` 터미널(터미널 2)에 성공 로그가 출력되는지 확인합니다. Firestore 에뮬레이터에 `SUCCESS` 상태의 문서가 생성되었는지는 아래 방법으로 확인할 수 있습니다.
-
-    #### 에뮬레이터 데이터 확인
-    
-    Firestore 에뮬레이터는 데이터 확인을 위한 웹 UI를 제공합니다. 이 방법을 사용하는 것을 권장합니다.
-    
-    1.  웹 브라우저에서 `http://localhost:4000` 으로 접속합니다.
-    2.  **Kind** 목록에서 `dify_batch_process_status`를 선택합니다.
-    3.  **Key / ID** 목록에서 확인하고 싶은 ID(예: `local-test-from-make`)를 클릭하면 우측에 저장된 데이터(`status`, `result` 등)를 확인할 수 있습니다.
-
-4.  **터미널 2: Loader 실행**
-    `worker` 테스트가 끝나면, 터미널 2에서 `Ctrl+C`로 `worker`를 중지하고 `loader`를 실행합니다.
+3.  **터미널 3: Loader 실행**
     ```bash
     make run-loader
     ```
 
-5.  **터미널 3: Loader 테스트**
-    `loader` 함수를 트리거하여 Google Sheets에서 데이터를 읽고 Firestore 에뮬레이터에 `PENDING` 상태로 기록하는지 확인합니다.
+4.  **터미널 4: Poller 실행**
     ```bash
-    make test-loader
+    make run-poller
     ```
-    > **참고**: `loader`는 로컬에서 Cloud Tasks 태스크를 생성하지 못하고 오류를 출력할 수 있으나, 이는 정상적인 동작입니다. Firestore 에뮬레이터에 데이터가 `PENDING` 상태로 기록되었는지 확인하는 것이 중요합니다.
+
+**테스트 시나리오 예시:**
+
+1.  `test-loader`를 실행하여 Google Sheets 데이터를 읽고 Firestore에 `PENDING` 상태로 저장되는지 확인합니다.
+2.  `test-worker`를 실행하여 `PENDING` 상태의 작업을 `PROCESSING`으로 변경하고, `workflow_run_id`가 저장되는지 확인합니다. (로컬에서는 실제 Dify 호출이 실패할 수 있으나, 상태 변경 로직을 테스트할 수 있습니다.)
+3.  `test-poller`를 실행하여 `PROCESSING` 상태의 작업을 조회하고 Dify API 상태 조회를 시도하는지 확인합니다.
 
 언제든지 `make help` 명령어를 실행하면 사용 가능한 모든 스크립트와 설명을 확인할 수 있습니다.
 
 ### 4.4. 배포된 서비스 테스트 (End-to-End)
 
-로컬 테스트와 별개로, GCP에 배포된 전체 파이프라인을 즉시 실행하여 테스트할 수 있습니다.
-
-`dify-batch-processor` 디렉터리에서 아래 명령어를 실행하면, Terraform으로 배포된 Cloud Scheduler 작업을 즉시 트리거합니다. 이 작업은 `loader` 서비스를 호출하여 전체 데이터 처리 파이프라인을 시작합니다.
+GCP에 배포된 전체 파이프라인을 즉시 실행하여 테스트할 수 있습니다. 아래 명령어는 `loader`를 트리거하는 Cloud Scheduler 작업을 즉시 실행시킵니다.
 
 ```bash
 make test-deployed
 ```
 
-명령 실행 후 GCP 콘솔의 Cloud Logging에서 `dify-batch-processor-loader`와 `dify-batch-processor-worker` 서비스의 로그를 확인하여 작업이 정상적으로 수행되었는지 확인할 수 있습니다.
+명령 실행 후 GCP 콘솔의 Cloud Logging에서 `dify-batch-processor-loader`, `dify-batch-processor-worker`, `dify-batch-processor-poller` 서비스의 로그를 순차적으로 확인하여 전체 파이프라인이 정상적으로 동작하는지 확인할 수 있습니다.
 
 ### 4.5. 문제 해결 (Troubleshooting)
 
