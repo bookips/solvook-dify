@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime
 from google.cloud import datastore, secretmanager
+from google.cloud.datastore.query import PropertyFilter
 
 # --- GCP Clients ---
 DB = datastore.Client(project=os.getenv("GCP_PROJECT_ID"))
@@ -29,7 +30,11 @@ def initialize_dify_api_keys(project_id: str = None, secret_id: str = None):
 
 
 # --- Datastore Operations ---
-def update_datastore(unique_id: str, status: str, data: dict | None = None):
+def update_datastore(
+        unique_id: str,
+        status: str, data: dict | None = None,
+        excluded_from_indexes: tuple = ('result', 'message', 'data')
+):
     """
     Updates or creates an entity in Datastore.
 
@@ -53,7 +58,6 @@ def update_datastore(unique_id: str, status: str, data: dict | None = None):
 
         entity.update(update_payload)
         
-        excluded_from_indexes = ('result', 'message')
         # Create a tuple of keys that are in the entity and should be excluded.
         entity.exclude_from_indexes = tuple(k for k in entity if k in excluded_from_indexes)
 
@@ -62,10 +66,12 @@ def update_datastore(unique_id: str, status: str, data: dict | None = None):
     except Exception as e:
         logging.error(f"[{unique_id}] Failed to update datastore: {e}", exc_info=True)
 
-def get_items_from_datastore(field: str, value: str, condition: str = "="):
+def get_entities_from_datastore(field: str, value: str, operator: str = "=", limit: int = None, key_only: bool = False):
     query = DB.query(kind=FIRESTORE_COLLECTION)
-    query.add_filter(field, condition, value)
-    return list(query.fetch())
+    query.add_filter(filter=PropertyFilter(field, operator, value))
+    if key_only:
+        query.keys_only()
+    return list(query.fetch(limit=limit)) if limit else list(query.fetch())
 
 # --- Secret Management ---
 def get_secret(project_id, secret_id, version_id="latest"):

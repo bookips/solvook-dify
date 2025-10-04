@@ -90,3 +90,9 @@ variable "slack_webhook_token" {
   sensitive   = true
   default     = null
 }
+
+variable "max_concurrent_workflows" {
+  description = "The maximum number of workflows to run concurrently."
+  type        = number
+  default     = 2
+}

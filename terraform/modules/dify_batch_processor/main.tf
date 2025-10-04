@@ -5,15 +5,15 @@ resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
   name     = "${var.name_prefix}-queue"
 
   retry_config {
-    max_attempts       = 3
-    min_backoff        = "30s"
-    max_backoff        = "3600s"
-    max_doublings      = 2
+    max_attempts  = 3
+    min_backoff   = "30s"
+    max_backoff   = "3600s"
+    max_doublings = 2
   }
 
   rate_limits {
     max_dispatches_per_second = 1
-    max_concurrent_dispatches = 3
+    max_concurrent_dispatches = 2
   }
 }
 
@@ -39,13 +39,40 @@ resource "google_storage_bucket" "poller_bucket" {
   force_destroy = true
 }
 
+resource "google_storage_bucket" "dispatcher_bucket" {
+  project       = var.project_id
+  name          = "dify-batch-processor-dispatcher"
+  location      = var.location
+  force_destroy = true
+}
+
 # --- Source Code Archiving ---
 
 # 1. Loader Source
 data "archive_file" "loader_source" {
   type        = "zip"
-  source_dir  = "${path.module}/../../../dify-batch-processor/loader"
   output_path = "/tmp/loader_source.zip"
+
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/loader/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/loader/config.py")
+    filename = "config.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/loader/requirements.txt")
+    filename = "requirements.txt"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/__init__.py")
+    filename = "shared/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/utils.py")
+    filename = "shared/utils.py"
+  }
 }
 
 resource "google_storage_bucket_object" "loader_source_object" {
@@ -120,6 +147,39 @@ resource "google_storage_bucket_object" "poller_source_object" {
   source = data.archive_file.poller_source.output_path
 }
 
+# 4. Dispatcher Source
+data "archive_file" "dispatcher_source" {
+  type        = "zip"
+  output_path = "/tmp/dispatcher_source.zip"
+
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/dispatcher/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/dispatcher/config.py")
+    filename = "config.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/dispatcher/requirements.txt")
+    filename = "requirements.txt"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/__init__.py")
+    filename = "shared/__init__.py"
+  }
+  source {
+    content  = file("${path.module}/../../../dify-batch-processor/shared/utils.py")
+    filename = "shared/utils.py"
+  }
+}
+
+resource "google_storage_bucket_object" "dispatcher_source_object" {
+  name   = "source/dispatcher-source-${data.archive_file.dispatcher_source.output_md5}.zip"
+  bucket = google_storage_bucket.dispatcher_bucket.name
+  source = data.archive_file.dispatcher_source.output_path
+}
+
 
 # --- Cloud Functions (2nd Gen) ---
 
@@ -156,14 +216,11 @@ resource "google_cloudfunctions2_function" "loader" {
       SPREADSHEET_ID                      = var.spreadsheet_id
       SHEET_NAME                          = var.sheet_name
       UNIQUE_ID_COLUMN                    = var.unique_id_column
-      QUEUE_NAME                          = google_cloud_tasks_queue.dify_batch_processor_queue.name
-      WORKER_URL                          = google_cloudfunctions2_function.worker.service_config[0].uri
       FIRESTORE_COLLECTION                = var.firestore_collection
       PASSAGE_ANALYSIS_WORKFLOW_ID        = var.passage_analysis_workflow_id
       PASSAGE_WORKBOOK_WORKFLOW_ID        = var.passage_workbook_workflow_id
       DIFY_API_ENDPOINT                   = var.dify_api_endpoint
       GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
-      FUNCTION_SERVICE_ACCOUNT_EMAIL      = var.function_service_account_email
     }
   }
 }
@@ -240,7 +297,46 @@ resource "google_cloudfunctions2_function" "poller" {
   }
 }
 
-# 4. Cloud Scheduler to trigger the Poller
+# 4. Dify Dispatcher Service
+resource "google_cloudfunctions2_function" "dispatcher" {
+  project     = var.project_id
+  location    = var.location
+  name        = "${var.name_prefix}-dispatcher"
+  description = "Dispatches tasks based on current workflow concurrency."
+  labels = {
+    "source-generation" = google_storage_bucket_object.dispatcher_source_object.generation
+  }
+
+  build_config {
+    runtime     = "python313"
+    entry_point = "main"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.dispatcher_bucket.name
+        object = google_storage_bucket_object.dispatcher_source_object.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count    = 1
+    min_instance_count    = 0
+    available_memory      = "256Mi"
+    timeout_seconds       = 60
+    service_account_email = var.function_service_account_email
+    environment_variables = {
+      GCP_PROJECT_ID                 = var.project_id
+      GCP_LOCATION                   = var.location
+      FIRESTORE_COLLECTION           = var.firestore_collection
+      QUEUE_NAME                     = google_cloud_tasks_queue.dify_batch_processor_queue.name
+      WORKER_URL                     = google_cloudfunctions2_function.worker.service_config[0].uri
+      FUNCTION_SERVICE_ACCOUNT_EMAIL = var.function_service_account_email
+      MAX_CONCURRENT_WORKFLOWS       = var.max_concurrent_workflows
+    }
+  }
+}
+
+# --- Schedulers ---
 
 resource "google_cloud_scheduler_job" "poller_scheduler" {
   project   = var.project_id
@@ -250,7 +346,23 @@ resource "google_cloud_scheduler_job" "poller_scheduler" {
   time_zone = "Etc/UTC"
 
   http_target {
-    uri = google_cloudfunctions2_function.poller.service_config[0].uri
+    uri         = google_cloudfunctions2_function.poller.service_config[0].uri
+    http_method = "POST"
+    oidc_token {
+      service_account_email = var.function_service_account_email
+    }
+  }
+}
+
+resource "google_cloud_scheduler_job" "dispatcher_scheduler" {
+  project   = var.project_id
+  region    = var.location
+  name      = "${var.name_prefix}-dispatcher-scheduler"
+  schedule  = "* * * * *" # Every minute
+  time_zone = "Etc/UTC"
+
+  http_target {
+    uri         = google_cloudfunctions2_function.dispatcher.service_config[0].uri
     http_method = "POST"
     oidc_token {
       service_account_email = var.function_service_account_email
@@ -292,6 +404,15 @@ resource "google_cloud_run_v2_service_iam_member" "poller_invoker" {
   project  = var.project_id
   location = var.location
   name     = google_cloudfunctions2_function.poller.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${var.function_service_account_email}"
+}
+
+# Allow Cloud Scheduler to invoke the Dispatcher Cloud Run service
+resource "google_cloud_run_v2_service_iam_member" "dispatcher_invoker" {
+  project  = var.project_id
+  location = var.location
+  name     = google_cloudfunctions2_function.dispatcher.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${var.function_service_account_email}"
 }

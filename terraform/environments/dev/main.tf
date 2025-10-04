@@ -258,16 +258,16 @@ module "dify_batch_processor" {
 
 # --- Cloud Scheduler to trigger the loader function daily ---
 resource "google_cloud_scheduler_job" "dify_batch_processor_trigger" {
-  project      = var.project_id
-  region       = var.region
-  name         = "dify-batch-processor-daily-trigger"
-  description  = "Triggers the Dify Batch Processor loader function every day at midnight."
-  schedule     = "0 */3 * * *" # Runs every 3 hours
-  time_zone    = "Asia/Seoul"
+  project          = var.project_id
+  region           = var.region
+  name             = "dify-batch-processor-daily-trigger"
+  description      = "Triggers the Dify Batch Processor loader function every day at midnight."
+  schedule         = "0 */3 * * *" # Runs every 3 hours
+  time_zone        = "Asia/Seoul"
   attempt_deadline = "320s"
 
   http_target {
-    uri = module.dify_batch_processor.loader_service_uri
+    uri         = module.dify_batch_processor.loader_service_uri
     http_method = "POST"
 
     oidc_token {

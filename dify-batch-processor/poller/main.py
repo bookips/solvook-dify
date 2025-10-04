@@ -6,7 +6,7 @@ import functions_framework
 load_dotenv()
 
 from config import Config
-from shared.utils import get_items_from_datastore, initialize_dify_api_keys, update_datastore
+from shared.utils import get_entities_from_datastore, initialize_dify_api_keys, update_datastore
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -21,7 +21,7 @@ def main(request: dict):
         logging.error("DIFY_API_KEYS_BY_WORKFLOW_ID not initialized. Aborting.")
         return "Internal Server Error: Service is not configured.", 500
 
-    processing_jobs = get_items_from_datastore("status", "PROCESSING")
+    processing_jobs = get_entities_from_datastore("status", "PROCESSING", operator="=", key_only=False)
     if not processing_jobs:
         logging.info("No jobs in 'PROCESSING' state found. Poller exiting.")
         return "No jobs to process.", 200
@@ -51,7 +51,7 @@ def main(request: dict):
             data = response.json()
             workflow_status = data.get("status")
 
-            if workflow_status == "succeeded":
+            if workflow_status == "succeeded" or workflow_status == "partial-succeeded":
                 logging.info(f"[{unique_id}] Workflow run {workflow_run_id} succeeded.")
                 update_datastore(unique_id, 'SUCCESS', data={"result": str(data)})
             elif workflow_status == "failed":

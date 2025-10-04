@@ -1,0 +1,8 @@
+# Google Cloud
+google-cloud-datastore
+google-cloud-tasks
+google-cloud-secret-manager
+functions-framework
+
+# For local development .env loading
+python-dotenv==0.21.0

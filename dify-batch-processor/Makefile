@@ -15,8 +15,7 @@ GCP_LOCATION ?= asia-northeast3
 SCHEDULER_JOB_NAME ?= dify-batch-processor-daily-trigger
 
 # Phony targets (targets that don't represent files)
-.PHONY: help all install setup run-emulator stop-emulator run-loader run-worker test-loader test-worker test-deployed clean
-
+.PHONY: help all install setup run-emulator stop-emulator run-loader run-worker test-loader test-worker test-deployed clean update-prod-datastore
 # Default target
 all: help
 
@@ -43,6 +42,9 @@ help:
 	@echo "  run-worker       Run the worker function on port $(WORKER_PORT)."
 	@echo "  test-loader      Send a test request to the running loader."
 	@echo "  test-worker      Send a test request to the running worker."
+	@echo ""
+	@echo "Data Management:"
+	@echo "  update-prod-datastore ARGS=\"--field status --asis FAILED\"  # Update live GCP Datastore data. (USE WITH CAUTION!)"
 
 install:
 	@echo "--> Installing dependencies using poetry..."
@@ -103,3 +105,14 @@ test-deployed:
 clean:
 	@echo "--> Cleaning up emulator PID file..."
 	@rm -f $(EMULATOR_PID_FILE)
+
+# --- Data Management ---
+ 
+# Allows passing arguments to the update script.
+# Example: make update-prod-datastore ARGS="--field status --asis PROCESSING --tobe PENDING"
+update-prod-datastore:
+	@echo "Step 1: Authenticating with GCP..."
+	gcloud auth application-default login
+	@echo "\nStep 2: Running the production update script..."
+	@echo "Executing: poetry run python scripts/update_prod_datastore.py $(ARGS)"
+	poetry run python scripts/update_prod_datastore.py $(ARGS)

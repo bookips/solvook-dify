@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 import functions_framework
-from google.cloud import datastore, tasks_v2, secretmanager
+from google.cloud import datastore
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -10,13 +10,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from config import Config
+from shared.utils import get_secret
 
-def get_secret(project_id, secret_id, version_id="latest"):
-    """Fetches a secret from Google Secret Manager."""
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+# --- Clients ---
+# For Firestore and Cloud Tasks, we can rely on Application Default Credentials (ADC) in GCP.
+# For local development, GOOGLE_APPLICATION_CREDENTIALS should be set, which ADC will pick up.
+DB = datastore.Client(project=Config.PROJECT_ID)
+
+# Configure logging at the module level
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 def get_gcp_credentials():
     """
@@ -49,16 +51,6 @@ def get_gcp_credentials():
     # Fallback to Application Default Credentials (ADC) if no specific credentials are provided
     logging.warning("No explicit credentials provided. Falling back to Application Default Credentials for Sheets API.")
     return None
-
-# --- Clients ---
-# For Firestore and Cloud Tasks, we can rely on Application Default Credentials (ADC) in GCP.
-# For local development, GOOGLE_APPLICATION_CREDENTIALS should be set, which ADC will pick up.
-db = datastore.Client(project=Config.PROJECT_ID)
-tasks_client = tasks_v2.CloudTasksClient()
-
-# Configure logging at the module level
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-
 
 def stream_structured_sheet_data(
     sheet_service,
@@ -151,7 +143,7 @@ def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = Tr
             }
 
 
-def create_unique_id_by_category(data: list[dict], category: str, row_number: int) -> str:
+def create_unique_id_by_category(data: list[dict], category: str) -> str:
     """Creates a unique task ID based on the category and a unique identifier from the data."""
     workflow_id = Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(category)
     passage_group_id = find_data_by_name(data, "passageGroupId")
@@ -161,16 +153,6 @@ def create_unique_id_by_category(data: list[dict], category: str, row_number: in
         case "워크북":
             passage_id = find_data_by_name(data, "passageId")
             return f"{workflow_id}_{passage_group_id}_{passage_id}"
-
-
-def get_task_status(task_id: str) -> str | None:
-    """Retrieves the status of a task from Datastore by its key."""
-    key = db.key(Config.FIRESTORE_COLLECTION, task_id)
-    entity = db.get(key)
-    if entity:
-        return entity.get('status')
-    return None
-
 
 @functions_framework.http
 def main(request: dict):
@@ -197,7 +179,7 @@ def main(request: dict):
             filter_column_value="TRUE"
         )
 
-        tasks_created_count = 0
+        # tasks_created_count = 0
         processed_rows = 0
         for row_number, structured_row in data_stream:
             processed_rows += 1
@@ -210,82 +192,38 @@ def main(request: dict):
 
             for each in category.split(","):
                 each = each.strip()
-                unique_id = create_unique_id_by_category(structured_row, each, row_number)
+                unique_id = create_unique_id_by_category(structured_row, each)
 
-                task_creation_needed = False
-                with db.transaction():
-                    key = db.key(Config.FIRESTORE_COLLECTION, unique_id)
-                    entity = db.get(key)
+                with DB.transaction():
+                    key = DB.key(Config.FIRESTORE_COLLECTION, unique_id)
+                    entity = DB.get(key)
                     status = entity.get("status") if entity else None
 
+                    isNew = each == "워크북" and status == "SUCCESS"
+                    input_data = to_dify_inputs_by_category(structured_row, each, isNew)
                     # Only create a task if it's new (no status) or has failed.
-                    # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.
+                    # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.                    
                     if status is None or status == 'FAILED':
                         if not entity:
                             entity = datastore.Entity(key=key)
                         entity.update({
                             'status': 'PENDING',
+                            "data": json.dumps(input_data, ensure_ascii=False),
+                            "workflow_id": Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(each),
                             'timestamp': datetime.now()
                         })
-                        db.put(entity)
-                        task_creation_needed = True
+                        # Exclude 'data' field from indexing to avoid 1500 byte limit
+                        entity.exclude_from_indexes = tuple(k for k in entity if k in ('result', 'message', 'data'))
+                        DB.put(entity)
                     else:
                         logging.info(f"Skipping task creation for ID {unique_id} because its status is '{status}'.")
-
-                if task_creation_needed:
-                    # The original `isNew` logic would re-trigger successful workbooks,
-                    # which contradicts the goal of preventing duplicates.
-                    isNew = each == "워크북" and status == "SUCCESS"
-                    input_data = to_dify_inputs_by_category(structured_row, each, isNew)
-
-                    # Create a unique task name with a timestamp to avoid Cloud Tasks' deduplication,
-                    # as our transaction now handles the idempotency.
-                    task_id = f"{unique_id}_{int(datetime.now().timestamp())}"
-                    create_cloud_task(input_data, task_id)
-                    tasks_created_count += 1
 
         if processed_rows == 0:
             logging.info("No data found in Google Sheets that matches the filter.")
             return "No data found in Google Sheets.", 200
 
-        logging.info(f"Successfully created {tasks_created_count} tasks.")
-        return f"Created {tasks_created_count} tasks.", 200
+        return f"Processed {processed_rows} rows from Google Sheets.", 200
 
     except Exception as e:
         logging.error(f"An error occurred: {e}", exc_info=True)
         return "Internal Server Error", 500
-
-
-def create_cloud_task(input_data: dict, task_id: str):
-    """Creates a task in Cloud Tasks."""
-    parent = tasks_client.queue_path(Config.PROJECT_ID, Config.LOCATION, Config.QUEUE_NAME)
-    task = {
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": Config.WORKER_URL,
-            "headers": {"Content-type": "application/json"},
-            "oidc_token": {
-                "service_account_email": Config.FUNCTION_SERVICE_ACCOUNT_EMAIL,
-            },
-        }
-    }
-    splitted = task_id.split('_')
-    workflow_id, unique_id = splitted[0], '_'.join(splitted[:-1])
-    payload = {
-        "unique_id": unique_id,
-        "data": input_data,
-        "workflow_id": workflow_id,
-    }
-
-    task["http_request"]["body"] = json.dumps(payload).encode()
-    task["name"] = f"{parent}/tasks/{task_id}"
-
-    try:
-        response = tasks_client.create_task(request={"parent": parent, "task": task})
-        logging.info(f"Created task: {response.name} on dify workflow {workflow_id}")
-    except Exception as e:
-        if "ALREADY_EXISTS" in str(e):
-            logging.warning(f"Task for ID {task_id} likely already exists. Skipping.")
-        else:
-            logging.error(f"Error creating task for ID {task_id}: {e}")
-            raise

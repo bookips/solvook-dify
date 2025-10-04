@@ -484,7 +484,7 @@ resource "google_monitoring_alert_policy" "dify_service_5xx_errors" {
 }
 
 resource "google_monitoring_dashboard" "dify_dashboard" {
-  project        = var.project_id
+  project = var.project_id
   dashboard_json = jsonencode({
     "displayName" : "Dify Application Dashboard",
     "gridLayout" : {
@@ -570,13 +570,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_99",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_99",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_99",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p99"
+                "legendTemplate" : "p99"
               },
               {
                 "timeSeriesQuery" : {
@@ -585,13 +585,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_95",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_95",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p95"
+                "legendTemplate" : "p95"
               },
               {
                 "timeSeriesQuery" : {
@@ -600,13 +600,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_50",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_50",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_50",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p50"
+                "legendTemplate" : "p50"
               }
             ],
             "timeshiftDuration" : "0s",
@@ -627,13 +627,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_99",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_99",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_99",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p99"
+                "legendTemplate" : "p99"
               },
               {
                 "timeSeriesQuery" : {
@@ -642,13 +642,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_95",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_95",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p95"
+                "legendTemplate" : "p95"
               },
               {
                 "timeSeriesQuery" : {
@@ -657,13 +657,13 @@ resource "google_monitoring_dashboard" "dify_dashboard" {
                     "aggregation" : {
                       "alignmentPeriod" : "60s",
                       "perSeriesAligner" : "ALIGN_PERCENTILE_50",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_50",
-                      "groupByFields": ["resource.label.service_name"]
+                      "crossSeriesReducer" : "REDUCE_PERCENTILE_50",
+                      "groupByFields" : ["resource.label.service_name"]
                     }
                   }
                 },
                 "plotType" : "LINE",
-                "legendTemplate": "p50"
+                "legendTemplate" : "p50"
               }
             ],
             "timeshiftDuration" : "0s",
