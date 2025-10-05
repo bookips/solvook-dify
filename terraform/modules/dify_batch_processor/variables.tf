@@ -84,12 +84,18 @@ variable "slack_channel_name" {
   default     = null
 }
 
-variable "slack_webhook_token" {
-  type        = string
-  description = "The Slack webhook token."
-  sensitive   = true
-  default     = null
+variable "processing_timeout_minutes" {
+  description = "The maximum time in minutes a job can be in the 'PROCESSING' state before being marked as FAILED."
+  type        = number
+  default     = 30
 }
+
+variable "slack_webhook_token" {
+  description = "The Slack webhook token for notifications."
+  type        = string
+  sensitive   = true
+}
+
 
 variable "max_concurrent_workflows" {
   description = "The maximum number of workflows to run concurrently."

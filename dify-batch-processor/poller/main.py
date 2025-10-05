@@ -1,5 +1,6 @@
 import logging
 import requests
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import functions_framework
 
@@ -30,6 +31,22 @@ def main(request: dict):
 
     for job in processing_jobs:
         unique_id = job.key.name
+        
+        # Timeout logic
+        last_updated = job.get("timestamp")
+        if last_updated:
+            # Ensure last_updated is timezone-aware (Datastore stores UTC)
+            if last_updated.tzinfo is None:
+                last_updated = last_updated.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            time_difference = now - last_updated
+            
+            if time_difference > timedelta(minutes=Config.PROCESSING_TIMEOUT_MINUTES):
+                logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s). Marking as FAILED.")
+                update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
+                continue
+
         workflow_run_id = job.get("workflow_run_id")
         workflow_id = job.get("workflow_id")
 

@@ -289,10 +289,11 @@ resource "google_cloudfunctions2_function" "poller" {
     timeout_seconds       = 300
     service_account_email = var.function_service_account_email
     environment_variables = {
-      GCP_PROJECT_ID         = var.project_id
-      FIRESTORE_COLLECTION   = var.firestore_collection
-      DIFY_API_ENDPOINT      = var.dify_api_endpoint
-      DIFY_API_KEY_SECRET_ID = var.dify_api_key_secret_id
+      GCP_PROJECT_ID             = var.project_id
+      FIRESTORE_COLLECTION       = var.firestore_collection
+      DIFY_API_ENDPOINT          = var.dify_api_endpoint
+      DIFY_API_KEY_SECRET_ID     = var.dify_api_key_secret_id
+      PROCESSING_TIMEOUT_MINUTES = var.processing_timeout_minutes
     }
   }
 }
