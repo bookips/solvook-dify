@@ -132,13 +132,7 @@ Terraform 배포 시 생성되는 커스텀 대시보드에서 `loader`, `dispat
 ### 4.1. 사전 준비 사항
 
 1.  **Python & Poetry**: 프로젝트 의존성 관리를 위해 필요합니다.
-2.  **Google Cloud CLI**: Firestore 에뮬레이터를 설치하고 실행하기 위해 필요합니다. 아래 명령어를 실행하여 `beta` 컴포넌트와 에뮬레이터를 설치하세요.
-    ```bash
-    gcloud components install beta
-    gcloud components install cloud-firestore-emulator
-    ```
-3.  **Java 8+ JRE**: Firestore 에뮬레이터는 Java로 실행되므로, 시스템에 Java 8 이상의 버전이 설치되어 있어야 합니다.
-4.  **GCP 서비스 계정 키**: `loader`가 Google Sheets에 접근하기 위해 필요합니다. (`.gcp/` 디렉터리에 JSON 키 파일 저장)
+2.  **GCP 서비스 계정 키**: `loader`가 Google Sheets에 접근하기 위해 필요합니다. (`.gcp/` 디렉터리에 JSON 키 파일 저장)
 
 ### 4.2. 테스트 설정
 
@@ -153,43 +147,82 @@ Terraform 배포 시 생성되는 커스텀 대시보드에서 `loader`, `dispat
     ```
     이 명령어는 `.env.example` 파일을 복사하여 `.env` 파일을 생성합니다. 생성된 `.env` 파일을 열어 `YOUR_...`로 표시된 값들을 실제 프로젝트에 맞게 수정해야 합니다.
 
-### 4.3. 로컬 테스트 워크플로우
+### 4.3. 로컬 코드와 실제 GCP 리소스 연동 테스트 (하이브리드)
 
-각 서비스를 독립적으로 테스트하기 위해 여러 개의 터미널 세션이 필요합니다. 모든 명령어는 `dify-batch-processor` 디렉터리에서 실행합니다.
+로컬에서 코드를 수정하면서 Firestore 에뮬레이터가 아닌, **실제로 GCP에 배포된 Datastore와 Cloud Tasks 리소스와 연동**하여 테스트할 수 있습니다. 이 방식은 보다 현실적인 환경에서 각 서비스의 상호작용을 검증할 때 유용합니다.
 
-1.  **터미널 1: Firestore 에뮬레이터 실행**
+#### 4.3.1. 사전 준비 사항
+
+1.  **Terraform 배포 완료**: 테스트하려는 환경(예: `dev`)의 GCP 리소스가 `terraform apply`를 통해 배포되어 있어야 합니다.
+2.  **GCP 인증**: 로컬 환경에서 GCP 서비스에 접근할 수 있도록 `gcloud` CLI를 통해 인증해야 합니다.
     ```bash
-    make run-emulator
+    gcloud auth application-default login
     ```
 
-2.  **터미널 2: Worker 실행**
+#### 4.3.2. `.env` 파일 설정
+
+`make setup`으로 생성된 `.env` 파일이 실제 GCP 리소스를 바라보도록 수정해야 합니다. **가장 중요한 것은 `FIRESTORE_EMULATOR_HOST` 변수를 주석 처리하거나 삭제하는 것입니다.**
+
+```dotenv
+# .env
+
+# --- General Settings ---
+# FIRESTORE_EMULATOR_HOST="localhost:8080" # << 이 줄을 반드시 주석 처리하거나 삭제하세요.
+GCP_PROJECT_ID="your-gcp-project-id"       # << 실제 GCP 프로젝트 ID로 설정
+GCP_LOCATION="asia-northeast3"             # << 리소스가 배포된 리전으로 설정
+
+# --- Service Specific Settings ---
+# loader, dispatcher, worker, poller가 사용하는 환경 변수들을
+# terraform/environments/dev/terraform.tfvars 파일과 일치하도록 설정합니다.
+# 특히 아래 값들은 실제 배포된 리소스의 정보를 정확히 입력해야 합니다.
+
+# (예시) dispatcher가 Cloud Tasks 큐를 찾기 위해 필요
+QUEUE_NAME="dify-batch-processor-queue" # Terraform으로 생성된 Cloud Tasks 큐 이름
+
+# (예시) dispatcher가 worker를 호출하기 위해 필요
+WORKER_URL="https://dify-batch-processor-worker-....run.app" # 배포된 worker의 Cloud Run URL
+
+# 기타 필요한 모든 변수 (SPREADSHEET_ID, DIFY_API_ENDPOINT 등)
+# ...
+```
+
+#### 4.3.3. 하이브리드 테스트 워크플로우
+
+1.  **터미널 1: Worker 실행**
+    로컬에서 `worker`를 실행하여 실제 Cloud Tasks 큐로부터 작업을 받을 준비를 합니다.
     ```bash
     make run-worker
     ```
 
+2.  **터미널 2: Loader 실행**
+    로컬에서 `loader`를 실행합니다. `loader`는 Google Sheets에서 데이터를 읽어 **실제 GCP Datastore**에 `PENDING` 상태로 작업을 저장합니다.
+    ```bash
+    make run-loader
+    ```
+    GCP 콘솔의 Datastore에서 데이터가 `PENDING` 상태로 추가되었는지 확인합니다.
+
 3.  **터미널 3: Dispatcher 실행**
+    로컬에서 `dispatcher`를 실행합니다. `dispatcher`는 **실제 GCP Datastore**에서 `PENDING` 상태의 작업을 조회하고, 용량이 확보되었다면 **실제 Cloud Tasks 큐**에 태스크를 생성합니다.
     ```bash
     make run-dispatcher
     ```
 
-4.  **터미널 4: Poller 실행**
+4.  **결과 확인**:
+    -   `dispatcher` 실행 후, **터미널 1 (`worker`)** 로그에 Cloud Tasks로부터 태스크를 수신하여 처리를 시작하는 내용이 출력되는지 확인합니다.
+    -   GCP 콘솔의 Datastore에서 작업 상태가 `PENDING` -> `QUEUED` -> `PROCESSING`으로 변경되는 것을 확인합니다.
+
+5.  **터미널 4: Poller 실행 (선택 사항)**
+    `PROCESSING` 상태의 작업을 확인하고 싶다면, 로컬에서 `poller`를 실행하여 실제 Datastore의 데이터를 기반으로 Dify API 상태 조회를 수행할 수 있습니다.
     ```bash
     make run-poller
     ```
-    
-5.  **터미널 5: Loader 실행**
-    ```bash
-    make run-loader
-    ```
 
-**테스트 시나리오 예시:**
+#### 4.3.4. 중요: VPC 서비스 제어(VPC-SC) 환경에서의 제약
 
-1.  `make test-loader`를 실행하여 Firestore에 `PENDING` 상태의 작업이 생성되는지 확인합니다.
-2.  `make test-dispatcher`를 실행하여 `PENDING` 상태의 작업을 `QUEUED`로 변경하고 Cloud Tasks 생성을 시도하는지 확인합니다. (로컬에서는 실제 태스크 생성이 실패할 수 있습니다.)
-3.  `make test-worker`를 실행하여 `QUEUED` 상태의 작업을 `PROCESSING`으로 변경하고 `workflow_run_id`가 저장되는지 확인합니다.
-4.  `make test-poller`를 실행하여 `PROCESSING` 상태의 작업을 조회하고 Dify API 상태 조회를 시도하는지 확인합니다.
+> ⚠️ **경고**: 이 하이브리드 테스트 방식은 GCP 조직에 **VPC 서비스 제어(VPC Service Controls)**가 활성화된 경우, `CONSUMER_INVALID` 에러를 발생시키며 실패할 가능성이 매우 높습니다.
 
-언제든지 `make help` 명령어를 실행하면 사용 가능한 모든 스크립트와 설명을 확인할 수 있습니다.
+-   **원인**: VPC-SC는 신뢰할 수 없는 네트워크(예: 개발자의 로컬 머신)에서 GCP 서비스 API로의 직접적인 호출을 보안 정책상 차단합니다.
+-   **해결 방안**: 이 문제를 해결하려면 보안 경계 **내부**에서 코드를 실행해야 합니다. GCP 프로젝트 내에 작은 GCE(Google Compute Engine) VM 인스턴스를 생성하고, 해당 VM에 접속하여 이 가이드의 `4.4.3` 단계를 수행하면 됩니다. 모든 API 호출이 GCP 내부 네트워크에서 발생하므로 VPC-SC 정책에 의해 차단되지 않습니다.
 
 ### 4.4. 배포된 서비스 테스트 (End-to-End)
 
