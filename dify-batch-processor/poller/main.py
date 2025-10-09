@@ -66,7 +66,7 @@ def main(request: dict):
             
             if time_difference > timedelta(minutes=Config.PROCESSING_TIMEOUT_MINUTES):
                 job_data = json.loads(job.get("data", "{}"))
-                logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s). Marking as FAILED.")
+                logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)")
                 match workflow_id:
                     case Config.PASSAGE_ANALYSIS_WORKFLOW_ID:
                         passage_group_id = job_data.get("passageGroupId")
@@ -75,8 +75,8 @@ def main(request: dict):
                         passage_group_id = job_data.get("passageGroupId")
                         passage_id = job_data.get("passageId")
                         object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"
-                if check_object_exists(Config.AWS_BUCKET_NAME, object_name):
-                    update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_BUCKET_NAME}/{object_name}"})
+                if check_object_exists(Config.AWS_S3_BUCKET, object_name):
+                    update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"})
                 else:
                     update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
                 continue
