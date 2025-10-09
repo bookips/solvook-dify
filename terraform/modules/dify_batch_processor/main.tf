@@ -297,6 +297,8 @@ resource "google_cloudfunctions2_function" "poller" {
       AWS_S3_BUCKET                = var.aws_s3_bucket
       PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
       PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
+      AWS_ACCESS_KEY_ID            = var.aws_access_key_id
+      AWS_SECRET_ACCESS_KEY        = var.aws_secret_access_key
     }
   }
 }

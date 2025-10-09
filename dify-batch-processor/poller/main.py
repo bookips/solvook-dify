@@ -22,7 +22,12 @@ def check_object_exists(bucket: str, object_name: str) -> bool:
     """
     Checks if an object exists in a AWS bucket.
     """
-    s3_client = boto3.client("s3")
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=Config.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
+        region_name="ap-northeast-2"
+    )
     try:
         s3_client.head_object(Bucket=bucket, Key=object_name)
         return True

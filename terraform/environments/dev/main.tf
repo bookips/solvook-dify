@@ -249,6 +249,8 @@ module "dify_batch_processor" {
   passage_workbook_workflow_id        = var.passage_workbook_workflow_id
   slack_channel_name                  = var.slack_channel_name
   slack_webhook_token                 = var.slack_webhook_secret_name != null ? data.google_secret_manager_secret_version.slack_webhook[0].secret_data : null
+  aws_access_key_id                   = local.shared_env_vars.AWS_ACCESS_KEY_ID
+  aws_secret_access_key               = local.shared_env_vars.AWS_SECRET_ACCESS_KEY
 
   depends_on = [
     google_project_service.enabled_services,

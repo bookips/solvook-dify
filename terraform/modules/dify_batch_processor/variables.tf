@@ -108,3 +108,15 @@ variable "aws_s3_bucket" {
   type        = string
   default     = "solvook-creator"
 }
+
+variable "aws_access_key_id" {
+  description = "The AWS access key ID for S3."
+  type        = string
+  sensitive   = true
+}
+
+variable "aws_secret_access_key" {
+  description = "The AWS secret access key for S3."
+  type        = string
+  sensitive   = true
+}
