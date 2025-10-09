@@ -102,3 +102,9 @@ variable "max_concurrent_workflows" {
   type        = number
   default     = 2
 }
+
+variable "aws_s3_bucket" {
+  description = "the result object buccket name"
+  type        = string
+  default     = "solvook-creator"
+}

@@ -1,4 +1,6 @@
+import json
 import logging
+import boto3
 import requests
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -16,6 +18,18 @@ try:
 except Exception:
     DIFY_API_KEYS_BY_WORKFLOW_ID = None
 
+def check_object_exists(bucket: str, object_name: str) -> bool:
+    """
+    Checks if an object exists in a AWS bucket.
+    """
+    s3_client = boto3.client("s3")
+    try:
+        s3_client.head_object(Bucket=bucket, Key=object_name)
+        return True
+    except s3_client.exceptions.ClientError:
+        return False
+
+
 @functions_framework.http
 def main(request: dict):
     if not DIFY_API_KEYS_BY_WORKFLOW_ID:
@@ -31,9 +45,12 @@ def main(request: dict):
 
     for job in processing_jobs:
         unique_id = job.key.name
-        
+        workflow_run_id = job.get("workflow_run_id")
+        workflow_id = job.get("workflow_id")
+
         # Timeout logic
         last_updated = job.get("timestamp")
+
         if last_updated:
             # Ensure last_updated is timezone-aware (Datastore stores UTC)
             if last_updated.tzinfo is None:
@@ -43,12 +60,21 @@ def main(request: dict):
             time_difference = now - last_updated
             
             if time_difference > timedelta(minutes=Config.PROCESSING_TIMEOUT_MINUTES):
+                job_data = json.loads(job.get("data", "{}"))
                 logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s). Marking as FAILED.")
-                update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
+                match workflow_id:
+                    case Config.PASSAGE_ANALYSIS_WORKFLOW_ID:
+                        passage_group_id = job_data.get("passageGroupId")
+                        object_name = f"passage_analysis/{passage_group_id}/result.json"
+                    case Config.WORKBOOK_WORKFLOW_ID:
+                        passage_group_id = job_data.get("passageGroupId")
+                        passage_id = job_data.get("passageId")
+                        object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"
+                if check_object_exists(Config.AWS_BUCKET_NAME, object_name):
+                    update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_BUCKET_NAME}/{object_name}"})
+                else:
+                    update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
                 continue
-
-        workflow_run_id = job.get("workflow_run_id")
-        workflow_id = job.get("workflow_id")
 
         if not workflow_run_id or not workflow_id:
             logging.warning(f"[{unique_id}] Job is 'PROCESSING' but missing 'workflow_run_id' or 'workflow_id'. Skipping.")

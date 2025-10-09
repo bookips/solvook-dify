@@ -8,3 +8,6 @@ requests==2.31.0
 
 # For local development .env loading
 python-dotenv==0.21.0
+
+# AWS SDK for Python (Boto3)
+boto3==1.40.48

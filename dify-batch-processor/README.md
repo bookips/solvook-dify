@@ -233,13 +233,3 @@ make test-deployed
 ```
 
 명령 실행 후 GCP 콘솔의 Cloud Logging에서 `dify-batch-processor-loader`, `dify-batch-processor-worker`, `dify-batch-processor-poller` 서비스의 로그를 순차적으로 확인하여 전체 파이프라인이 정상적으로 동작하는지 확인할 수 있습니다.
-
-### 4.5. 문제 해결 (Troubleshooting)
-
-#### `CONSUMER_INVALID` 에러 발생 시
-
-로컬 환경에서 `loader` 또는 `worker` 실행 시, Cloud Tasks나 Firestore API 호출에서 `PermissionDenied: 403 ... reason: "CONSUMER_INVALID"` 와 같은 에러가 발생할 수 있습니다.
-
-*   **원인**: 이 에러는 IAM 권한 부족이 아니라, GCP 조직에 설정된 **VPC 서비스 제어(VPC Service Controls)**와 같은 보안 정책 때문일 가능성이 매우 높습니다. 이 정책은 신뢰할 수 없는 네트워크(예: 로컬 개발 환경)에서 GCP 서비스로의 API 호출을 차단합니다.
-
-*   **해결 방안**: 가장 확실한 해결책은 보안 경계 **내부**에서 코드를 실행하는 것입니다. GCP 프로젝트 내에 작은 GCE(Google Compute Engine) VM 인스턴스를 생성하고, 해당 VM에 접속하여 개발 환경을 구성한 뒤 `make run-loader`나 `make run-worker`를 실행하면 이 문제를 우회할 수 있습니다. 모든 API 호출이 GCP 내부 네트워크에서 발생하므로 보안 정책에 의해 차단되지 않습니다.
