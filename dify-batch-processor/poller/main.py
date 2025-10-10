@@ -35,6 +35,31 @@ def check_object_exists(bucket: str, object_name: str) -> bool:
         return False
 
 
+def handle_timeout(unique_id: str, workflow_id: str, job_data: dict):
+    """Handles jobs that have timed out."""
+    logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)")
+    
+    object_name = None
+    match workflow_id:
+        case Config.PASSAGE_ANALYSIS_WORKFLOW_ID:
+            passage_group_id = job_data.get("passageGroupId")
+            object_name = f"passage-analysis/{passage_group_id}/result.json"
+        case Config.WORKBOOK_WORKFLOW_ID:
+            passage_group_id = job_data.get("passageGroupId")
+            passage_id = job_data.get("passageId")
+            object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"
+
+    if object_name is None:
+        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out, but workflow_id '{workflow_id}' is unknown or data is missing."})
+        return
+
+    logging.info(f"[{unique_id}] Checking for result object in S3: s3://{Config.AWS_S3_BUCKET}/{object_name}")                        
+    if check_object_exists(Config.AWS_S3_BUCKET, object_name):
+        update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"})
+    else:
+        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
+
+
 @functions_framework.http
 def main(request: dict):
     if not DIFY_API_KEYS_BY_WORKFLOW_ID:
@@ -66,19 +91,7 @@ def main(request: dict):
             
             if time_difference > timedelta(minutes=Config.PROCESSING_TIMEOUT_MINUTES):
                 job_data = json.loads(job.get("data", "{}"))
-                logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)")
-                match workflow_id:
-                    case Config.PASSAGE_ANALYSIS_WORKFLOW_ID:
-                        passage_group_id = job_data.get("passageGroupId")
-                        object_name = f"passage_analysis/{passage_group_id}/result.json"
-                    case Config.WORKBOOK_WORKFLOW_ID:
-                        passage_group_id = job_data.get("passageGroupId")
-                        passage_id = job_data.get("passageId")
-                        object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"
-                if check_object_exists(Config.AWS_S3_BUCKET, object_name):
-                    update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"})
-                else:
-                    update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
+                handle_timeout(unique_id, workflow_id, job_data)
                 continue
 
         if not workflow_run_id or not workflow_id:
