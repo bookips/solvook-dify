@@ -199,7 +199,7 @@ def main(request: dict):
                     entity = DB.get(key)
                     status = entity.get("status") if entity else None
 
-                    isNew = each == "워크북" and status == "SUCCESS"
+                    isNew = each != "워크북"
                     input_data = to_dify_inputs_by_category(structured_row, each, isNew)
                     # Only create a task if it's new (no status) or has failed.
                     # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.                    
