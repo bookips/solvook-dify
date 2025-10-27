@@ -208,7 +208,7 @@ resource "google_cloudfunctions2_function" "loader" {
     max_instance_count    = 5
     min_instance_count    = 0
     available_memory      = "256Mi"
-    timeout_seconds       = 300
+    timeout_seconds       = 600
     service_account_email = var.function_service_account_email
     environment_variables = {
       GCP_PROJECT_ID                      = var.project_id

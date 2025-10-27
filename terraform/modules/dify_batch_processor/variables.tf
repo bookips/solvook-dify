@@ -87,7 +87,7 @@ variable "slack_channel_name" {
 variable "processing_timeout_minutes" {
   description = "The maximum time in minutes a job can be in the 'PROCESSING' state before being marked as FAILED."
   type        = number
-  default     = 15
+  default     = 20
 }
 
 variable "slack_webhook_token" {
