@@ -186,6 +186,7 @@ def main(request: dict):
             if not structured_row: continue
 
             category = find_data_by_name(structured_row, "content_category")
+            force_creation = find_data_by_name(structured_row, "force_creation")
             if not category:
                 logging.warning(f"Row {row_number} missing 'content_category'. Skipping.")
                 continue
@@ -203,7 +204,7 @@ def main(request: dict):
                     input_data = to_dify_inputs_by_category(structured_row, each, isNew)
                     # Only create a task if it's new (no status) or has failed.
                     # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.                    
-                    if status is None or status == 'FAILED':
+                    if (status is None or status == 'FAILED') or (force_creation and force_creation.lower() == "true"):
                         if not entity:
                             entity = datastore.Entity(key=key)
                         entity.update({
