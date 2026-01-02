@@ -41,10 +41,10 @@ def handle_timeout(unique_id: str, workflow_id: str, job_data: dict):
     
     object_name = None
     match workflow_id:
-        case Config.PASSAGE_ANALYSIS_WORKFLOW_ID:
+        case Config.HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID | Config.MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID:
             passage_group_id = job_data.get("passageGroupId")
             object_name = f"passage-analysis/{passage_group_id}/result.json"
-        case Config.PASSAGE_WORKBOOK_WORKFLOW_ID:
+        case Config.HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID | Config.MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID:
             passage_group_id = job_data.get("passageGroupId")
             passage_id = job_data.get("passageId")
             object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"

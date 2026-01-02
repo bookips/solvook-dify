@@ -186,6 +186,7 @@ def main(request: dict):
             if not structured_row: continue
 
             category = find_data_by_name(structured_row, "content_category")
+            curriculum = find_data_by_name(structured_row, "curriculum")
             force_creation = find_data_by_name(structured_row, "force_creation")
             if not category:
                 logging.warning(f"Row {row_number} missing 'content_category'. Skipping.")
@@ -204,13 +205,13 @@ def main(request: dict):
                     input_data = to_dify_inputs_by_category(structured_row, each, isNew)
                     # Only create a task if it's new (no status) or has failed.
                     # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.                    
-                    if (status is None or status == 'FAILED') or (force_creation and force_creation.lower() == "true"):
+                    if (status is None or status == 'FAILED') or (status == 'SUCCESS' and force_creation and force_creation.lower() == "true"):
                         if not entity:
                             entity = datastore.Entity(key=key)
                         entity.update({
                             'status': 'PENDING',
                             "data": json.dumps(input_data, ensure_ascii=False),
-                            "workflow_id": Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(each),
+                            "workflow_id": Config.DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY.get(curriculum).get(each),
                             'timestamp': datetime.now()
                         })
                         # Exclude 'data' field from indexing to avoid 1500 byte limit

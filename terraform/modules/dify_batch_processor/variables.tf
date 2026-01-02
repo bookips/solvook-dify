@@ -62,13 +62,23 @@ variable "function_service_account_email" {
   type        = string
 }
 
-variable "passage_analysis_workflow_id" {
-  description = "The workflow ID for passage analysis."
+variable "high_passage_analysis_workflow_id" {
+  description = "The workflow ID for high passage analysis."
   type        = string
 }
 
-variable "passage_workbook_workflow_id" {
-  description = "The workflow ID for passage workbook creation."
+variable "high_passage_workbook_workflow_id" {
+  description = "The workflow ID for high passage workbook creation."
+  type        = string
+}
+
+variable "middle_passage_analysis_workflow_id" {
+  description = "The workflow ID for middle passage analysis."
+  type        = string
+}
+
+variable "middle_passage_workbook_workflow_id" {
+  description = "The workflow ID for middle passage workbook creation."
   type        = string
 }
 

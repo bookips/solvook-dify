@@ -217,8 +217,10 @@ resource "google_cloudfunctions2_function" "loader" {
       SHEET_NAME                          = var.sheet_name
       UNIQUE_ID_COLUMN                    = var.unique_id_column
       FIRESTORE_COLLECTION                = var.firestore_collection
-      PASSAGE_ANALYSIS_WORKFLOW_ID        = var.passage_analysis_workflow_id
-      PASSAGE_WORKBOOK_WORKFLOW_ID        = var.passage_workbook_workflow_id
+      HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID   = var.high_passage_analysis_workflow_id
+      HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID   = var.high_passage_workbook_workflow_id
+      MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID = var.middle_passage_analysis_workflow_id
+      MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID = var.middle_passage_workbook_workflow_id
       DIFY_API_ENDPOINT                   = var.dify_api_endpoint
       GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
     }
@@ -295,8 +297,10 @@ resource "google_cloudfunctions2_function" "poller" {
       DIFY_API_KEY_SECRET_ID       = var.dify_api_key_secret_id
       PROCESSING_TIMEOUT_MINUTES   = var.processing_timeout_minutes
       AWS_S3_BUCKET                = var.aws_s3_bucket
-      PASSAGE_ANALYSIS_WORKFLOW_ID = var.passage_analysis_workflow_id
-      PASSAGE_WORKBOOK_WORKFLOW_ID = var.passage_workbook_workflow_id
+      HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID   = var.high_passage_analysis_workflow_id
+      HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID   = var.high_passage_workbook_workflow_id
+      MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID = var.middle_passage_analysis_workflow_id
+      MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID = var.middle_passage_workbook_workflow_id
       AWS_ACCESS_KEY_ID            = var.aws_access_key_id
       AWS_SECRET_ACCESS_KEY        = var.aws_secret_access_key
     }

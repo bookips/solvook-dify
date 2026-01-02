@@ -25,8 +25,14 @@ class Config:
 
     # Firestore Info
     FIRESTORE_COLLECTION = os.environ.get("FIRESTORE_COLLECTION", "dify_batch_process_status")
-    DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY = {
-        "본문분석": os.environ.get("PASSAGE_ANALYSIS_WORKFLOW_ID"),
-        "워크북": os.environ.get("PASSAGE_WORKBOOK_WORKFLOW_ID"),
+    DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY = {
+        "high": {
+            "본문분석": os.environ.get("HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID"),
+            "워크북": os.environ.get("HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID"),
+        },
+        "middle": {
+            "본문분석": os.environ.get("MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID"),
+            "워크북": os.environ.get("MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID"),
+        }
     }
     DIFY_API_ENDPOINT = os.environ.get("DIFY_API_ENDPOINT")

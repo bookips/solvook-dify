@@ -245,8 +245,10 @@ module "dify_batch_processor" {
   dify_api_timeout_minutes            = var.dify_api_timeout_minutes
   google_sheets_credentials_secret_id = var.google_sheets_credentials_secret_id
   function_service_account_email      = google_service_account.dify_batch_processor_sa.email
-  passage_analysis_workflow_id        = var.passage_analysis_workflow_id
-  passage_workbook_workflow_id        = var.passage_workbook_workflow_id
+  high_passage_analysis_workflow_id   = var.high_passage_analysis_workflow_id
+  high_passage_workbook_workflow_id   = var.high_passage_workbook_workflow_id
+  middle_passage_analysis_workflow_id = var.middle_passage_analysis_workflow_id
+  middle_passage_workbook_workflow_id = var.middle_passage_workbook_workflow_id
   slack_channel_name                  = var.slack_channel_name
   slack_webhook_token                 = var.slack_webhook_secret_name != null ? data.google_secret_manager_secret_version.slack_webhook[0].secret_data : null
   aws_access_key_id                   = local.shared_env_vars.AWS_ACCESS_KEY_ID
@@ -264,7 +266,7 @@ resource "google_cloud_scheduler_job" "dify_batch_processor_trigger" {
   region           = var.region
   name             = "dify-batch-processor-daily-trigger"
   description      = "Triggers the Dify Batch Processor loader function every day at midnight."
-  schedule         = "0 */3 * * *" # Runs every 3 hours
+  schedule         = "0 */6 * * *" # Runs every 3 hours
   time_zone        = "Asia/Seoul"
   attempt_deadline = "320s"
 

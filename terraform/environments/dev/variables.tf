@@ -171,12 +171,22 @@ variable "google_sheets_credentials_secret_id" {
   type        = string
 }
 
-variable "passage_analysis_workflow_id" {
-  description = ""
+variable "high_passage_analysis_workflow_id" {
+  description = "고등 본문분석 dify workflow id"
   type        = string
 }
 
-variable "passage_workbook_workflow_id" {
-  description = ""
+variable "high_passage_workbook_workflow_id" {
+  description = "고등 워크북 dify workflow id"
+  type        = string
+}
+
+variable "middle_passage_analysis_workflow_id" {
+  description = "중등 본문분석 dify workflow id"
+  type        = string
+}
+
+variable "middle_passage_workbook_workflow_id" {
+  description = "중등 워크북 dify workflow id"
   type        = string
 }
