@@ -143,9 +143,9 @@ def to_dify_inputs_by_category(data: list[dict], category: str, isNew: bool = Tr
             }
 
 
-def create_unique_id_by_category(data: list[dict], category: str) -> str:
+def create_unique_id_by_category(data: list[dict], curriculum: str, category: str) -> str:
     """Creates a unique task ID based on the category and a unique identifier from the data."""
-    workflow_id = Config.DIFY_WORKFLOW_IDS_BY_CONTENT_CATEGORY.get(category)
+    workflow_id = Config.DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY.get(curriculum).get(category)
     passage_group_id = find_data_by_name(data, "passageGroupId")
     match category:
         case "본문분석":
@@ -194,7 +194,7 @@ def main(request: dict):
 
             for each in category.split(","):
                 each = each.strip()
-                unique_id = create_unique_id_by_category(structured_row, each)
+                unique_id = create_unique_id_by_category(structured_row, curriculum, each)
 
                 with DB.transaction():
                     key = DB.key(Config.FIRESTORE_COLLECTION, unique_id)
