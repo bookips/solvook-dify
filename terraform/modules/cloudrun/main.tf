@@ -70,6 +70,10 @@ resource "google_cloud_run_v2_service" "dify_service" {
         }
       }
       env {
+        name  = "PYTHONUNBUFFERED"
+        value = "1"
+      }
+      env {
         name  = "PORT"
         value = 5001
       }
@@ -191,9 +195,10 @@ resource "google_cloud_run_v2_service" "dify_service" {
         value = 2
       }
       # NOTE: Changing PM2_HOME is required for pm2 to work properly on Cloud Run Gen2 environment because of permission issues
+      # /tmp is always writable regardless of the container's user; /app/web/.pm2 fails with EACCES in v1.13.0+
       env {
         name  = "PM2_HOME"
-        value = "/app/web/.pm2"
+        value = "/tmp/.pm2"
       }
       env {
         name  = "LOOP_NODE_MAX_COUNT"
@@ -311,6 +316,10 @@ resource "google_cloud_run_v2_service" "dify_service" {
         }
       }
       env {
+        name  = "PYTHONUNBUFFERED"
+        value = "1"
+      }
+      env {
         name  = "PORT"
         value = 5000
       }
@@ -357,12 +366,15 @@ resource "google_cloud_run_v2_service" "dify_service" {
           value = env.value
         }
       }
+      # NOTE: Celery workers do not serve HTTP/TCP traffic. We use a TCP probe against
+      # dify-plugin-daemon's port (5003) on shared localhost to satisfy Cloud Run's requirement.
+      # The Terraform google provider cannot remove a startup_probe once set, so we point it
+      # at a co-located container's port that starts quickly.
       startup_probe {
-        http_get {
-          path = "/"
-          port = 5000
+        tcp_socket {
+          port = 5003
         }
-        initial_delay_seconds = 10
+        initial_delay_seconds = 0
         timeout_seconds       = 240
         period_seconds        = 240
         failure_threshold     = 1

@@ -1,8 +1,8 @@
 project_id                              = "solvook-infra"   # replace with your project id
 region                                  = "asia-northeast3" # replace with your region
-dify_version                            = "latest"
-dify_plugin_daemon_version              = "latest-local"
-dify_sandbox_version                    = "latest"
+dify_version                            = "1.13.0"
+dify_plugin_daemon_version              = "0.5.3-local"
+dify_sandbox_version                    = "0.2.12"
 nginx_repository_id                     = "dify-nginx-repo"
 web_repository_id                       = "dify-web-repo"
 api_repository_id                       = "dify-api-repo"

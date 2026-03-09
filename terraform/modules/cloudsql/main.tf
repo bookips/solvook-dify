@@ -78,6 +78,13 @@ resource "google_sql_database" "dify_database" {
   depends_on = [google_sql_database_instance.postgres_instance]
 }
 
+# NOTE: The "dify" database requires the following extensions to be installed manually
+# after initial provisioning (Cloud SQL does not support Terraform-managed extensions):
+#   CREATE EXTENSION IF NOT EXISTS vector;    -- required for VECTOR_STORE=pgvector
+#   CREATE EXTENSION IF NOT EXISTS uuid-ossp; -- required for UUID generation
+# Dify's MIGRATION_ENABLED=true should handle this on startup, but verify via:
+#   SELECT extname FROM pg_extension WHERE extname IN ('vector', 'uuid-ossp');
+
 resource "google_sql_database" "dify_plugin_database" {
   name     = "dify_plugin"
   instance = google_sql_database_instance.postgres_instance.name
