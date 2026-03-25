@@ -5,7 +5,7 @@ resource "google_cloud_tasks_queue" "dify_batch_processor_queue" {
   name     = "${var.name_prefix}-queue"
 
   retry_config {
-    max_attempts  = 3
+    max_attempts  = 1
     min_backoff   = "30s"
     max_backoff   = "3600s"
     max_doublings = 2
