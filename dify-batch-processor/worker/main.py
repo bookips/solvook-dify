@@ -67,7 +67,7 @@ def main(request: dict):
             Config.DIFY_API_ENDPOINT,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=dify_payload,
-            timeout=60,
+            timeout=(10, Config.DIFY_API_TIMEOUT_MINUTES * 60),
             stream=True
         )
         response.raise_for_status()
