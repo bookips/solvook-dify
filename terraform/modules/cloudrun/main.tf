@@ -37,6 +37,7 @@ resource "google_cloud_run_v2_service" "dify_service" {
   template {
     service_account       = google_service_account.dify_service_account.email
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+    timeout               = "600s"
     containers {
       name  = "nginx"
       image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.nginx_repository_id}/dify-nginx:latest"
