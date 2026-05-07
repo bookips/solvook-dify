@@ -1,8 +1,10 @@
 # Google Cloud
-google-cloud-datastore
 google-cloud-tasks
 google-cloud-secret-manager
 functions-framework
+
+# Database
+psycopg2-binary==2.9.11
 
 # Google API
 google-api-python-client

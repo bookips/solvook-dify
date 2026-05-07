@@ -213,7 +213,6 @@ resource "google_service_account" "dify_batch_processor_sa" {
 # Grant necessary roles to the service account.
 resource "google_project_iam_member" "dify_batch_processor_sa_roles" {
   for_each = toset([
-    "roles/datastore.user",
     "roles/cloudtasks.enqueuer",
     "roles/secretmanager.secretAccessor"
     # "roles/run.invoker" is now granted on a per-service basis for security.
@@ -253,6 +252,12 @@ module "dify_batch_processor" {
   slack_webhook_token                 = var.slack_webhook_secret_name != null ? data.google_secret_manager_secret_version.slack_webhook[0].secret_data : null
   aws_access_key_id                   = local.shared_env_vars.AWS_ACCESS_KEY_ID
   aws_secret_access_key               = local.shared_env_vars.AWS_SECRET_ACCESS_KEY
+  db_host                             = module.cloudsql.cloudsql_internal_ip
+  db_port                             = var.db_port
+  db_username                         = var.db_username
+  db_password_secret_name              = var.db_password_secret_name
+  db_database                         = var.db_database
+  vpc_connector                       = "projects/${var.project_id}/locations/${var.region}/connectors/cloud-run-job"
 
   depends_on = [
     google_project_service.enabled_services,

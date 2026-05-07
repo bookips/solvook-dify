@@ -2,14 +2,13 @@ from datetime import datetime
 import logging
 import json
 import functions_framework
-from google.cloud import datastore, tasks_v2
+from google.cloud import tasks_v2
 
 from config import Config
 from shared.utils import update_datastore, get_entities_from_datastore
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-DB = datastore.Client(project=Config.PROJECT_ID)
 tasks_client = tasks_v2.CloudTasksClient()
 
 @functions_framework.http

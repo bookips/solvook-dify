@@ -23,8 +23,6 @@ class Config:
     QUEUE_NAME = os.environ.get("QUEUE_NAME") # The name of the Cloud Tasks queue
     WORKER_URL = os.environ.get("WORKER_URL") # The URL of the Worker Cloud Function
 
-    # Firestore Info
-    FIRESTORE_COLLECTION = os.environ.get("FIRESTORE_COLLECTION", "dify_batch_process_status")
     DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY = {
         "high": {
             "본문분석": os.environ.get("HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID"),

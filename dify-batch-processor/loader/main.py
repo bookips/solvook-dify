@@ -1,8 +1,7 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 import functions_framework
-from google.cloud import datastore
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -10,12 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from config import Config
-from shared.utils import get_secret
-
-# --- Clients ---
-# For Firestore and Cloud Tasks, we can rely on Application Default Credentials (ADC) in GCP.
-# For local development, GOOGLE_APPLICATION_CREDENTIALS should be set, which ADC will pick up.
-DB = datastore.Client(project=Config.PROJECT_ID)
+from shared.utils import get_secret, get_db_connection, check_and_upsert_status
 
 # Configure logging at the module level
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -36,7 +30,7 @@ def get_gcp_credentials():
             Config.GOOGLE_APPLICATION_CREDENTIALS,
             scopes=scopes
         )
-    
+
     # In GCP, fetch credentials from Secret Manager
     if Config.GOOGLE_SHEETS_CREDENTIALS_SECRET_ID:
         try:
@@ -158,7 +152,7 @@ def create_unique_id_by_category(data: list[dict], curriculum: str, category: st
 def main(request: dict):
     """
     Main function for the Loader Cloud Function.
-    Reads data from Google Sheets, filters it based on Datastore status,
+    Reads data from Google Sheets, filters it based on PostgreSQL status,
     and creates tasks in Cloud Tasks for processing.
     """
     try:
@@ -179,46 +173,45 @@ def main(request: dict):
             filter_column_value="TRUE"
         )
 
-        # tasks_created_count = 0
         processed_rows = 0
-        for row_number, structured_row in data_stream:
-            processed_rows += 1
-            if not structured_row: continue
+        conn = get_db_connection()
+        try:
+            for row_number, structured_row in data_stream:
+                processed_rows += 1
+                if not structured_row: continue
 
-            category = find_data_by_name(structured_row, "content_category")
-            curriculum = find_data_by_name(structured_row, "curriculum")
-            force_creation = find_data_by_name(structured_row, "force_creation")
-            if not category:
-                logging.warning(f"Row {row_number} missing 'content_category'. Skipping.")
-                continue
+                category = find_data_by_name(structured_row, "content_category")
+                curriculum = find_data_by_name(structured_row, "curriculum")
+                force_creation = find_data_by_name(structured_row, "force_creation")
+                if not category:
+                    logging.warning(f"Row {row_number} missing 'content_category'. Skipping.")
+                    continue
 
-            for each in category.split(","):
-                each = each.strip()
-                unique_id = create_unique_id_by_category(structured_row, curriculum, each)
-
-                with DB.transaction():
-                    key = DB.key(Config.FIRESTORE_COLLECTION, unique_id)
-                    entity = DB.get(key)
-                    status = entity.get("status") if entity else None
+                for each in category.split(","):
+                    each = each.strip()
+                    unique_id = create_unique_id_by_category(structured_row, curriculum, each)
 
                     isNew = each != "워크북"
                     input_data = to_dify_inputs_by_category(structured_row, each, isNew)
-                    # Only create a task if it's new (no status) or has failed.
-                    # Do not re-queue tasks that are PENDING, PROCESSING, or SUCCESS.                    
-                    if (status is None or status == 'FAILED') or (status == 'SUCCESS' and force_creation and force_creation.lower() == "true"):
-                        if not entity:
-                            entity = datastore.Entity(key=key)
-                        entity.update({
-                            'status': 'PENDING',
-                            "data": json.dumps(input_data, ensure_ascii=False),
-                            "workflow_id": Config.DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY.get(curriculum).get(each),
-                            'timestamp': datetime.now()
-                        })
-                        # Exclude 'data' field from indexing to avoid 1500 byte limit
-                        entity.exclude_from_indexes = tuple(k for k in entity if k in ('result', 'message', 'data'))
-                        DB.put(entity)
-                    else:
-                        logging.info(f"Skipping task creation for ID {unique_id} because its status is '{status}'.")
+
+                    force = bool(force_creation and force_creation.lower() == "true")
+
+                    with conn:
+                        upserted, current_status = check_and_upsert_status(
+                            conn,
+                            unique_id,
+                            'PENDING',
+                            data={
+                                'data': json.dumps(input_data, ensure_ascii=False),
+                                'workflow_id': Config.DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY.get(curriculum).get(each),
+                            },
+                            force=force,
+                        )
+
+                    if not upserted:
+                        logging.info(f"Skipping task creation for ID {unique_id} because its status is '{current_status}'.")
+        finally:
+            conn.close()
 
         if processed_rows == 0:
             logging.info("No data found in Google Sheets that matches the filter.")

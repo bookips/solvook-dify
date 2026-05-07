@@ -1,7 +1,9 @@
 # Google Cloud
 functions-framework==3.*
-google-cloud-datastore==2.15.1
 google-cloud-secret-manager==2.16.2
+
+# Database
+psycopg2-binary==2.9.11
 
 # HTTP Requests
 requests==2.31.0

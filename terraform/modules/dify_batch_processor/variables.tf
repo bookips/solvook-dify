@@ -14,12 +14,6 @@ variable "name_prefix" {
   default     = "dify-batch-processor"
 }
 
-variable "firestore_collection" {
-  description = "The name of the Firestore collection for status tracking."
-  type        = string
-  default     = "dify_batch_process_status"
-}
-
 variable "spreadsheet_id" {
   description = "The ID of the Google Sheet to process."
   type        = string
@@ -129,4 +123,35 @@ variable "aws_secret_access_key" {
   description = "The AWS secret access key for S3."
   type        = string
   sensitive   = true
+}
+
+variable "db_host" {
+  description = "The private IP address of the Cloud SQL instance."
+  type        = string
+}
+
+variable "db_port" {
+  description = "The database port."
+  type        = string
+  default     = "5432"
+}
+
+variable "db_username" {
+  description = "The database username."
+  type        = string
+}
+
+variable "db_password_secret_name" {
+  description = "The name of the Secret Manager secret for the database password."
+  type        = string
+}
+
+variable "db_database" {
+  description = "The database name."
+  type        = string
+}
+
+variable "vpc_connector" {
+  description = "The fully qualified name of the VPC connector for Cloud Functions."
+  type        = string
 }

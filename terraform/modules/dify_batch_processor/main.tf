@@ -208,21 +208,33 @@ resource "google_cloudfunctions2_function" "loader" {
     max_instance_count    = 5
     min_instance_count    = 0
     available_memory      = "256Mi"
-    timeout_seconds       = 600
-    service_account_email = var.function_service_account_email
+    timeout_seconds               = 600
+    service_account_email         = var.function_service_account_email
+    vpc_connector                 = var.vpc_connector
+    vpc_connector_egress_settings = "PRIVATE_RANGES_ONLY"
     environment_variables = {
       GCP_PROJECT_ID                      = var.project_id
       GCP_LOCATION                        = var.location
       SPREADSHEET_ID                      = var.spreadsheet_id
       SHEET_NAME                          = var.sheet_name
       UNIQUE_ID_COLUMN                    = var.unique_id_column
-      FIRESTORE_COLLECTION                = var.firestore_collection
       HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID   = var.high_passage_analysis_workflow_id
       HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID   = var.high_passage_workbook_workflow_id
       MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID = var.middle_passage_analysis_workflow_id
       MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID = var.middle_passage_workbook_workflow_id
       DIFY_API_ENDPOINT                   = var.dify_api_endpoint
       GOOGLE_SHEETS_CREDENTIALS_SECRET_ID = var.google_sheets_credentials_secret_id
+      DB_HOST                             = var.db_host
+      DB_PORT                             = var.db_port
+      DB_USERNAME                         = var.db_username
+      DB_DATABASE                         = var.db_database
+    }
+
+    secret_environment_variables {
+      key        = "DB_PASSWORD"
+      project_id = var.project_id
+      secret     = var.db_password_secret_name
+      version    = "latest"
     }
   }
 }
@@ -251,14 +263,26 @@ resource "google_cloudfunctions2_function" "worker" {
     max_instance_count    = 10
     min_instance_count    = 0
     available_memory      = "256Mi"
-    timeout_seconds       = 630
-    service_account_email = var.function_service_account_email
+    timeout_seconds               = 630
+    service_account_email         = var.function_service_account_email
+    vpc_connector                 = var.vpc_connector
+    vpc_connector_egress_settings = "PRIVATE_RANGES_ONLY"
     environment_variables = {
       GCP_PROJECT_ID           = var.project_id
       DIFY_API_ENDPOINT        = var.dify_api_endpoint
-      FIRESTORE_COLLECTION     = var.firestore_collection
       DIFY_API_TIMEOUT_MINUTES = var.dify_api_timeout_minutes
       DIFY_API_KEY_SECRET_ID   = var.dify_api_key_secret_id
+      DB_HOST                  = var.db_host
+      DB_PORT                  = var.db_port
+      DB_USERNAME              = var.db_username
+      DB_DATABASE              = var.db_database
+    }
+
+    secret_environment_variables {
+      key        = "DB_PASSWORD"
+      project_id = var.project_id
+      secret     = var.db_password_secret_name
+      version    = "latest"
     }
   }
 }
@@ -288,11 +312,12 @@ resource "google_cloudfunctions2_function" "poller" {
     max_instance_count    = 1
     min_instance_count    = 0
     available_memory      = "256Mi"
-    timeout_seconds       = 300
-    service_account_email = var.function_service_account_email
+    timeout_seconds               = 300
+    service_account_email         = var.function_service_account_email
+    vpc_connector                 = var.vpc_connector
+    vpc_connector_egress_settings = "PRIVATE_RANGES_ONLY"
     environment_variables = {
       GCP_PROJECT_ID               = var.project_id
-      FIRESTORE_COLLECTION         = var.firestore_collection
       DIFY_API_ENDPOINT            = var.dify_api_endpoint
       DIFY_API_KEY_SECRET_ID       = var.dify_api_key_secret_id
       PROCESSING_TIMEOUT_MINUTES   = var.processing_timeout_minutes
@@ -303,6 +328,17 @@ resource "google_cloudfunctions2_function" "poller" {
       MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID = var.middle_passage_workbook_workflow_id
       AWS_ACCESS_KEY_ID            = var.aws_access_key_id
       AWS_SECRET_ACCESS_KEY        = var.aws_secret_access_key
+      DB_HOST                      = var.db_host
+      DB_PORT                      = var.db_port
+      DB_USERNAME                  = var.db_username
+      DB_DATABASE                  = var.db_database
+    }
+
+    secret_environment_variables {
+      key        = "DB_PASSWORD"
+      project_id = var.project_id
+      secret     = var.db_password_secret_name
+      version    = "latest"
     }
   }
 }
@@ -332,16 +368,28 @@ resource "google_cloudfunctions2_function" "dispatcher" {
     max_instance_count    = 1
     min_instance_count    = 0
     available_memory      = "256Mi"
-    timeout_seconds       = 60
-    service_account_email = var.function_service_account_email
+    timeout_seconds               = 60
+    service_account_email         = var.function_service_account_email
+    vpc_connector                 = var.vpc_connector
+    vpc_connector_egress_settings = "PRIVATE_RANGES_ONLY"
     environment_variables = {
       GCP_PROJECT_ID                 = var.project_id
       GCP_LOCATION                   = var.location
-      FIRESTORE_COLLECTION           = var.firestore_collection
       QUEUE_NAME                     = google_cloud_tasks_queue.dify_batch_processor_queue.name
       WORKER_URL                     = google_cloudfunctions2_function.worker.service_config[0].uri
       FUNCTION_SERVICE_ACCOUNT_EMAIL = var.function_service_account_email
       MAX_CONCURRENT_WORKFLOWS       = var.max_concurrent_workflows
+      DB_HOST                        = var.db_host
+      DB_PORT                        = var.db_port
+      DB_USERNAME                    = var.db_username
+      DB_DATABASE                    = var.db_database
+    }
+
+    secret_environment_variables {
+      key        = "DB_PASSWORD"
+      project_id = var.project_id
+      secret     = var.db_password_secret_name
+      version    = "latest"
     }
   }
 }
