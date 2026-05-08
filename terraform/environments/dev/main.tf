@@ -214,7 +214,8 @@ resource "google_service_account" "dify_batch_processor_sa" {
 resource "google_project_iam_member" "dify_batch_processor_sa_roles" {
   for_each = toset([
     "roles/cloudtasks.enqueuer",
-    "roles/secretmanager.secretAccessor"
+    "roles/secretmanager.secretAccessor",
+    "roles/cloudscheduler.jobRunner",
     # "roles/run.invoker" is now granted on a per-service basis for security.
   ])
   project = var.project_id
