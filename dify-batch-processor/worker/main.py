@@ -85,17 +85,16 @@ def main(request: dict):
                             break
                     except json.JSONDecodeError:
                         logging.warning(f"Could not decode JSON from line: {line}")
-        
-        if not workflow_run_id:
-            raise Exception("Failed to retrieve workflow_run_id from Dify's streaming response.")
 
-        update_data = {
-            "workflow_run_id": workflow_run_id,
-            "workflow_id": task_payload.workflow_id
-        }
+        update_data = {"workflow_id": task_payload.workflow_id}
+        if workflow_run_id:
+            update_data["workflow_run_id"] = workflow_run_id
+            logging.info(f"[{task_payload.unique_id}] Successfully dispatched. Stored run ID {workflow_run_id}.")
+        else:
+            logging.warning(f"[{task_payload.unique_id}] Dify accepted the request but workflow_run_id could not be parsed from stream. Marking as PROCESSING without run ID.")
+            update_data["message"] = "workflow_run_id not captured from stream response"
+
         update_datastore(task_payload.unique_id, 'PROCESSING', data=update_data)
-
-        logging.info(f"[{task_payload.unique_id}] Successfully dispatched. Stored run ID {workflow_run_id}.")
         return "Task dispatched successfully.", 202
 
     except Exception as e:

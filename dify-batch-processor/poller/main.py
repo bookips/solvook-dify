@@ -35,9 +35,10 @@ def check_object_exists(bucket: str, object_name: str) -> bool:
         return False
 
 
-def handle_timeout(unique_id: str, workflow_id: str, job_data: dict):
+def handle_timeout(unique_id: str, workflow_id: str, job_data: dict, elapsed_minutes: int = None):
     """Handles jobs that have timed out."""
-    logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)")
+    minutes = elapsed_minutes or Config.PROCESSING_TIMEOUT_MINUTES
+    logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {minutes} minute(s)")
     
     object_name = None
     match workflow_id:
@@ -57,7 +58,7 @@ def handle_timeout(unique_id: str, workflow_id: str, job_data: dict):
     if check_object_exists(Config.AWS_S3_BUCKET, object_name):
         update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"})
     else:
-        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {Config.PROCESSING_TIMEOUT_MINUTES} minute(s)."})
+        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {minutes} minute(s)."})
 
 
 @functions_framework.http
@@ -93,6 +94,19 @@ def main(request: dict):
                 job_data = json.loads(job.get("data", "{}"))
                 handle_timeout(unique_id, workflow_id, job_data)
                 continue
+
+        if not workflow_run_id and workflow_id:
+            if last_updated:
+                now = datetime.now(timezone.utc)
+                no_runid_elapsed = now - last_updated
+                if no_runid_elapsed > timedelta(minutes=Config.PROCESSING_NO_RUNID_TIMEOUT_MINUTES):
+                    elapsed_min = int(no_runid_elapsed.total_seconds() / 60)
+                    logging.warning(f"[{unique_id}] Job missing 'workflow_run_id' for {elapsed_min} minute(s). Checking S3 for results.")
+                    job_data = json.loads(job.get("data", "{}"))
+                    handle_timeout(unique_id, workflow_id, job_data, elapsed_minutes=elapsed_min)
+                else:
+                    logging.info(f"[{unique_id}] Job missing 'workflow_run_id', waiting for no-runid timeout ({Config.PROCESSING_NO_RUNID_TIMEOUT_MINUTES}m).")
+            continue
 
         if not workflow_run_id or not workflow_id:
             logging.warning(f"[{unique_id}] Job is 'PROCESSING' but missing 'workflow_run_id' or 'workflow_id'. Skipping.")
