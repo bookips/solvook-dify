@@ -113,8 +113,7 @@ module "cloudrun" {
   dify_plugin_daemon_version  = var.dify_plugin_daemon_version
   db_database                 = var.db_database
   db_database_plugin          = var.db_database_plugin
-  filestore_ip_address        = module.filestore.filestore_ip_address
-  filestore_fileshare_name    = module.filestore.filestore_fileshare_name
+  plugin_storage_bucket_name  = module.storage.plugin_storage_bucket_name
   shared_env_vars             = local.shared_env_vars
   min_instance_count          = var.min_instance_count
   max_instance_count          = var.max_instance_count
@@ -159,15 +158,6 @@ module "storage" {
   depends_on = [google_project_service.enabled_services]
 }
 
-module "filestore" {
-  source = "../../modules/filestore"
-
-  region = var.region
-
-  vpc_network_name = data.google_compute_network.default.name
-
-  depends_on = [google_project_service.enabled_services]
-}
 
 module "registry" {
   source = "../../modules/registry"

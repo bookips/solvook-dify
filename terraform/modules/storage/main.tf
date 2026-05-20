@@ -22,3 +22,13 @@ resource "google_storage_bucket_iam_member" "storage_admin" {
 resource "google_service_account_key" "storage_admin_key" {
   service_account_id = google_service_account.storage_admin.id
 }
+
+resource "google_storage_bucket" "plugin_storage" {
+  name                        = "${var.project_id}_dify-plugin-storage"
+  project                     = var.project_id
+  location                    = upper(var.region)
+  storage_class               = "STANDARD"
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+}

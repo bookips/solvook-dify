@@ -12,6 +12,12 @@ resource "google_project_iam_member" "dify_service_account_role" {
   role    = each.value
 }
 
+resource "google_storage_bucket_iam_member" "plugin_storage_access" {
+  bucket = var.plugin_storage_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.dify_service_account.email}"
+}
+
 resource "google_cloud_run_service_iam_binding" "public_service" {
   location = google_cloud_run_v2_service.dify_service.location
   service  = google_cloud_run_v2_service.dify_service.name
@@ -284,7 +290,7 @@ resource "google_cloud_run_v2_service" "dify_service" {
       }
       env {
         name  = "PYTHON_ENV_INIT_TIMEOUT"
-        value = 120
+        value = 300
       }
       env {
         name  = "PLUGIN_MAX_EXECUTION_TIMEOUT"
@@ -394,9 +400,8 @@ resource "google_cloud_run_v2_service" "dify_service" {
     }
     volumes {
       name = "plugin-daemon"
-      nfs {
-        server    = var.filestore_ip_address
-        path      = "/${var.filestore_fileshare_name}"
+      gcs {
+        bucket    = var.plugin_storage_bucket_name
         read_only = false
       }
     }

@@ -66,11 +66,7 @@ variable "db_database_plugin" {
   type = string
 }
 
-variable "filestore_ip_address" {
-  type = string
-}
-
-variable "filestore_fileshare_name" {
+variable "plugin_storage_bucket_name" {
   type = string
 }
 
