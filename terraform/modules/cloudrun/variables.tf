@@ -70,6 +70,10 @@ variable "plugin_storage_bucket_name" {
   type = string
 }
 
+variable "nfs_server_ip" {
+  type = string
+}
+
 variable "shared_env_vars" {
   type = map(string)
 }

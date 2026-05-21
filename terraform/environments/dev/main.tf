@@ -114,6 +114,7 @@ module "cloudrun" {
   db_database                 = var.db_database
   db_database_plugin          = var.db_database_plugin
   plugin_storage_bucket_name  = module.storage.plugin_storage_bucket_name
+  nfs_server_ip               = module.nfs_server.nfs_server_ip
   shared_env_vars             = local.shared_env_vars
   min_instance_count          = var.min_instance_count
   max_instance_count          = var.max_instance_count
@@ -154,6 +155,19 @@ module "storage" {
   project_id                 = var.project_id
   region                     = var.region
   google_storage_bucket_name = var.google_storage_bucket_name
+
+  depends_on = [google_project_service.enabled_services]
+}
+
+module "nfs_server" {
+  source = "../../modules/nfs_server"
+
+  project_id             = var.project_id
+  region                 = var.region
+  vpc_network_name       = data.google_compute_network.default.name
+  vpc_subnet_name        = data.google_compute_subnetwork.default.name
+  service_account_email  = google_service_account.dify_batch_processor_sa.email
+  plugin_storage_bucket  = module.storage.plugin_storage_bucket_name
 
   depends_on = [google_project_service.enabled_services]
 }

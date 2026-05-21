@@ -400,8 +400,9 @@ resource "google_cloud_run_v2_service" "dify_service" {
     }
     volumes {
       name = "plugin-daemon"
-      gcs {
-        bucket    = var.plugin_storage_bucket_name
+      nfs {
+        server    = var.nfs_server_ip
+        path      = "/export/plugin-storage"
         read_only = false
       }
     }
