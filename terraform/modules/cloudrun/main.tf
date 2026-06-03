@@ -300,6 +300,10 @@ resource "google_cloud_run_v2_service" "dify_service" {
         name  = "PIP_MIRROR_URL"
         value = ""
       }
+      env {
+        name  = "UV_HTTP_TIMEOUT"
+        value = 300
+      }
       startup_probe {
         timeout_seconds   = 240
         period_seconds    = 240
