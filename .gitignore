@@ -52,3 +52,7 @@ poetry.lock
 *.log
 
 dify-batch-processor/*.pid
+
+# Local env files with real secrets (keep .env.example tracked)
+.env.*
+!.env.example
