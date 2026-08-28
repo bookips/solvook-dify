@@ -113,16 +113,14 @@ variable "aws_s3_bucket" {
   default     = "solvook-creator"
 }
 
-variable "aws_access_key_id" {
-  description = "The AWS access key ID for S3."
+variable "aws_access_key_id_secret_name" {
+  description = "Secret Manager secret holding the AWS access key id used by the poller."
   type        = string
-  sensitive   = true
 }
 
-variable "aws_secret_access_key" {
-  description = "The AWS secret access key for S3."
+variable "aws_secret_access_key_secret_name" {
+  description = "Secret Manager secret holding the AWS secret access key used by the poller."
   type        = string
-  sensitive   = true
 }
 
 variable "db_host" {

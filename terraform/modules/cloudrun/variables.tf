@@ -46,12 +46,14 @@ variable "plugin_daemon_repository_id" {
   type = string
 }
 
-variable "plugin_daemon_key" {
-  type = string
+variable "plugin_daemon_key_secret_name" {
+  description = "Secret Manager secret holding the plugin daemon server key. Mounted at runtime, never rendered into the service config."
+  type        = string
 }
 
-variable "plugin_dify_inner_api_key" {
-  type = string
+variable "plugin_dify_inner_api_key_secret_name" {
+  description = "Secret Manager secret holding the Dify inner API key. Mounted at runtime, never rendered into the service config."
+  type        = string
 }
 
 variable "dify_plugin_daemon_version" {
@@ -76,6 +78,11 @@ variable "nfs_server_ip" {
 
 variable "shared_env_vars" {
   type = map(string)
+}
+
+variable "shared_secret_env_vars" {
+  description = "Environment variable name -> Secret Manager secret id. Injected as secret references so the values never appear in the Cloud Run config or in Terraform state."
+  type        = map(string)
 }
 
 variable "min_instance_count" {

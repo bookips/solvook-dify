@@ -205,9 +205,9 @@ resource "google_cloudfunctions2_function" "loader" {
   }
 
   service_config {
-    max_instance_count    = 5
-    min_instance_count    = 0
-    available_memory      = "256Mi"
+    max_instance_count            = 5
+    min_instance_count            = 0
+    available_memory              = "256Mi"
     timeout_seconds               = 600
     service_account_email         = var.function_service_account_email
     vpc_connector                 = var.vpc_connector
@@ -260,9 +260,9 @@ resource "google_cloudfunctions2_function" "worker" {
   }
 
   service_config {
-    max_instance_count    = 10
-    min_instance_count    = 0
-    available_memory      = "256Mi"
+    max_instance_count            = 10
+    min_instance_count            = 0
+    available_memory              = "256Mi"
     timeout_seconds               = 630
     service_account_email         = var.function_service_account_email
     vpc_connector                 = var.vpc_connector
@@ -309,35 +309,45 @@ resource "google_cloudfunctions2_function" "poller" {
   }
 
   service_config {
-    max_instance_count    = 1
-    min_instance_count    = 0
-    available_memory      = "256Mi"
+    max_instance_count            = 1
+    min_instance_count            = 0
+    available_memory              = "256Mi"
     timeout_seconds               = 300
     service_account_email         = var.function_service_account_email
     vpc_connector                 = var.vpc_connector
     vpc_connector_egress_settings = "PRIVATE_RANGES_ONLY"
     environment_variables = {
-      GCP_PROJECT_ID               = var.project_id
-      DIFY_API_ENDPOINT            = var.dify_api_endpoint
-      DIFY_API_KEY_SECRET_ID       = var.dify_api_key_secret_id
-      PROCESSING_TIMEOUT_MINUTES   = var.processing_timeout_minutes
-      AWS_S3_BUCKET                = var.aws_s3_bucket
+      GCP_PROJECT_ID                      = var.project_id
+      DIFY_API_ENDPOINT                   = var.dify_api_endpoint
+      DIFY_API_KEY_SECRET_ID              = var.dify_api_key_secret_id
+      PROCESSING_TIMEOUT_MINUTES          = var.processing_timeout_minutes
+      AWS_S3_BUCKET                       = var.aws_s3_bucket
       HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID   = var.high_passage_analysis_workflow_id
       HIGH_PASSAGE_WORKBOOK_WORKFLOW_ID   = var.high_passage_workbook_workflow_id
       MIDDLE_PASSAGE_ANALYSIS_WORKFLOW_ID = var.middle_passage_analysis_workflow_id
       MIDDLE_PASSAGE_WORKBOOK_WORKFLOW_ID = var.middle_passage_workbook_workflow_id
-      AWS_ACCESS_KEY_ID            = var.aws_access_key_id
-      AWS_SECRET_ACCESS_KEY        = var.aws_secret_access_key
-      DB_HOST                      = var.db_host
-      DB_PORT                      = var.db_port
-      DB_USERNAME                  = var.db_username
-      DB_DATABASE                  = var.db_database
+      DB_HOST                             = var.db_host
+      DB_PORT                             = var.db_port
+      DB_USERNAME                         = var.db_username
+      DB_DATABASE                         = var.db_database
     }
 
     secret_environment_variables {
       key        = "DB_PASSWORD"
       project_id = var.project_id
       secret     = var.db_password_secret_name
+      version    = "latest"
+    }
+    secret_environment_variables {
+      key        = "AWS_ACCESS_KEY_ID"
+      project_id = var.project_id
+      secret     = var.aws_access_key_id_secret_name
+      version    = "latest"
+    }
+    secret_environment_variables {
+      key        = "AWS_SECRET_ACCESS_KEY"
+      project_id = var.project_id
+      secret     = var.aws_secret_access_key_secret_name
       version    = "latest"
     }
   }
@@ -365,9 +375,9 @@ resource "google_cloudfunctions2_function" "dispatcher" {
   }
 
   service_config {
-    max_instance_count    = 1
-    min_instance_count    = 0
-    available_memory      = "256Mi"
+    max_instance_count            = 1
+    min_instance_count            = 0
+    available_memory              = "256Mi"
     timeout_seconds               = 60
     service_account_email         = var.function_service_account_email
     vpc_connector                 = var.vpc_connector

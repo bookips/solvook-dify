@@ -3,6 +3,28 @@ resource "google_service_account" "dify_service_account" {
   display_name = "Dify Service Account"
 }
 
+locals {
+  # Every Secret Manager secret the running containers read at startup.
+  runtime_secret_ids = toset(concat(
+    values(var.shared_secret_env_vars),
+    [
+      var.plugin_daemon_key_secret_name,
+      var.plugin_dify_inner_api_key_secret_name,
+    ],
+  ))
+}
+
+# The runtime service account resolves secret references itself, so it needs read
+# access on each secret. Granted per-secret rather than project-wide.
+resource "google_secret_manager_secret_iam_member" "dify_service_account_secret_access" {
+  for_each = local.runtime_secret_ids
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.dify_service_account.email}"
+}
+
 resource "google_project_iam_member" "dify_service_account_role" {
   for_each = toset([
     "roles/run.admin",
@@ -121,8 +143,13 @@ resource "google_cloud_run_v2_service" "dify_service" {
         value = 52428800
       }
       env {
-        name  = "INNER_API_KEY_FOR_PLUGIN"
-        value = var.plugin_dify_inner_api_key
+        name = "INNER_API_KEY_FOR_PLUGIN"
+        value_source {
+          secret_key_ref {
+            secret  = var.plugin_dify_inner_api_key_secret_name
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "DB_DATABASE"
@@ -133,6 +160,18 @@ resource "google_cloud_run_v2_service" "dify_service" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.shared_secret_env_vars
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
         }
       }
       startup_probe {
@@ -244,6 +283,18 @@ resource "google_cloud_run_v2_service" "dify_service" {
           value = env.value
         }
       }
+      dynamic "env" {
+        for_each = var.shared_secret_env_vars
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
       env {
         name  = "DB_DATABASE"
         value = var.db_database_plugin
@@ -253,8 +304,13 @@ resource "google_cloud_run_v2_service" "dify_service" {
         value = 5002
       }
       env {
-        name  = "SERVER_KEY"
-        value = var.plugin_daemon_key
+        name = "SERVER_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = var.plugin_daemon_key_secret_name
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "MAX_PLUGIN_PACKAGE_SIZE"
@@ -269,8 +325,13 @@ resource "google_cloud_run_v2_service" "dify_service" {
         value = "http://127.0.0.1:5001"
       }
       env {
-        name  = "DIFY_INNER_API_KEY"
-        value = var.plugin_dify_inner_api_key
+        name = "DIFY_INNER_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = var.plugin_dify_inner_api_key_secret_name
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "PLUGIN_REMOTE_INSTALLING_HOST"
@@ -363,8 +424,13 @@ resource "google_cloud_run_v2_service" "dify_service" {
         value = 52428800
       }
       env {
-        name  = "INNER_API_KEY_FOR_PLUGIN"
-        value = var.plugin_dify_inner_api_key
+        name = "INNER_API_KEY_FOR_PLUGIN"
+        value_source {
+          secret_key_ref {
+            secret  = var.plugin_dify_inner_api_key_secret_name
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "DB_DATABASE"
@@ -375,6 +441,18 @@ resource "google_cloud_run_v2_service" "dify_service" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      dynamic "env" {
+        for_each = var.shared_secret_env_vars
+        content {
+          name = env.key
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
         }
       }
       # NOTE: Celery workers do not serve HTTP/TCP traffic. We use a TCP probe against
@@ -411,6 +489,8 @@ resource "google_cloud_run_v2_service" "dify_service" {
       }
     }
   }
+
+  depends_on = [google_secret_manager_secret_iam_member.dify_service_account_secret_access]
 }
 
 resource "google_cloud_run_v2_service" "dify_sandbox" {
