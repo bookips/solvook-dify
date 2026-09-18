@@ -34,7 +34,7 @@ locals {
     "CODE_MAX_STRING_ARRAY_LENGTH"               = "500"
     "CODE_MAX_OBJECT_ARRAY_LENGTH"               = "500"
     "CODE_EXECUTION_TIMEOUT"                     = "10"
-    "WORKFLOW_MAX_EXECUTION_STEPS"               = "1000"
+    "WORKFLOW_MAX_EXECUTION_STEPS"               = "2000"
     "WORKFLOW_MAX_EXECUTION_TIME"                = "3000"
     "APP_MAX_EXECUTION_TIME"                     = "3000"
     "AWS_REGION"                                 = "ap-northeast-2"
