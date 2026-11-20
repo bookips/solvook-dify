@@ -5,11 +5,13 @@
   Cloud Tasks and Dify's HTTP responses are stand-ins.
 - One poller run now branches three ways on `failed` rows.
 - retry_count now travels through update_datastore from the poller.
+- A row can now return to PROCESSING, so a poller acting on an old snapshot could
+  overwrite a newer run. Poller writes are conditional on the snapshot (expect=).
 
 See docs/plans/2026-11-20-batch-poller-transient-retry.md, section 4.2.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,22 +31,33 @@ INPUTS = {"passageGroupId": "pg-1", "passage": "text"}
 
 
 class InMemoryTable:
-    """Stores rows with update_datastore's merge rule: only the columns passed are written.
+    """Stores rows with update_datastore's rules: only the columns passed are written,
+    and an ``expect`` write applies only while the row still matches it.
 
-    test_poller_pending_write_only_touches_retry_columns checks the real SQL follows
-    the same rule, so this stand-in does not drift from it unnoticed.
+    The real SQL for both rules is checked in test_status_columns.py and
+    test_poller_pending_write_only_touches_retry_columns, so this stand-in does not
+    drift from it unnoticed. Timestamps strictly increase so every write is distinct.
     """
 
     def __init__(self):
         self.rows: dict[str, dict] = {}
+        self._clock = datetime.now(timezone.utc)
 
-    def update_datastore(self, unique_id, status, data=None, **_):
+    def _now(self):
+        self._clock += timedelta(microseconds=1)
+        return self._clock
+
+    def update_datastore(self, unique_id, status, data=None, excluded_from_indexes=None, expect=None):
+        row = self.rows.get(unique_id)
+        if expect and row is not None and any(row.get(k) != v for k, v in expect.items()):
+            return False
         row = self.rows.setdefault(unique_id, {"unique_id": unique_id})
         row["status"] = status
-        row["timestamp"] = datetime.now(timezone.utc)
+        row["timestamp"] = self._now()
         for k, v in (data or {}).items():
             if k in utils._KNOWN_COLUMNS:
                 row[k] = v
+        return True
 
     def get_entities_from_datastore(self, field, value, operator="=", limit=None, key_only=False):
         assert operator == "="
@@ -241,3 +254,63 @@ def test_poller_pending_write_only_touches_retry_columns(monkeypatch):
     assert params["status"] == "PENDING"
     assert params["retry_count"] == 1
     assert params["workflow_run_id"] is None
+
+
+# --- a stale poller snapshot must not touch a newer run ---------------------------
+
+def test_stale_poller_snapshot_does_not_requeue_a_newer_run(dispatcher, worker, poller, table):
+    """Poller A reads j1 (run-1), is slow; meanwhile poller B re-queues it and run-2 starts.
+
+    When A finally acts on its snapshot, run-1 is still `failed` at Dify. Without the
+    guard A would re-queue j1 again, start a third run alongside run-2 and lose run-2.
+    """
+    cold = dify_response("failed", PLUGIN_COLD_START_ERROR)
+    [payload] = dispatch(dispatcher)
+    worker_starts(worker, payload, "run-1")
+    stale_snapshot = table.get_entities_from_datastore("status", "PROCESSING")
+
+    poll(poller, {"run-1": cold})  # poller B
+    [payload] = dispatch(dispatcher)
+    worker_starts(worker, payload, "run-2")
+    assert table.rows["j1"]["workflow_run_id"] == "run-2"
+
+    poller.get_entities_from_datastore = lambda *a, **k: stale_snapshot  # poller A resumes
+    poll(poller, {"run-1": cold})
+
+    row = table.rows["j1"]
+    assert row["status"] == "PROCESSING"
+    assert row["workflow_run_id"] == "run-2"
+    assert row["retry_count"] == 1
+    assert dispatch(dispatcher) == []
+
+
+def test_stale_poller_snapshot_does_not_fail_a_newer_run(dispatcher, worker, poller, table, monkeypatch):
+    """Same interleaving, but by the time A acts its snapshot looks timed out (no S3 result)."""
+    [payload] = dispatch(dispatcher)
+    worker_starts(worker, payload, "run-1")
+    stale_snapshot = table.get_entities_from_datastore("status", "PROCESSING")
+
+    poll(poller, {"run-1": dify_response("failed", PLUGIN_COLD_START_ERROR)})  # poller B
+    [payload] = dispatch(dispatcher)
+    worker_starts(worker, payload, "run-2")
+
+    monkeypatch.setattr(poller.Config, "PROCESSING_TIMEOUT_MINUTES", 30)
+    monkeypatch.setattr(
+        poller, "datetime", _Clock(stale_snapshot[0].get("timestamp") + timedelta(minutes=31))
+    )
+    poller.check_object_exists = MagicMock(return_value=False)
+    poller.get_entities_from_datastore = lambda *a, **k: stale_snapshot  # poller A resumes
+    poll(poller, {})
+
+    assert table.rows["j1"]["status"] == "PROCESSING"
+    assert table.rows["j1"]["workflow_run_id"] == "run-2"
+
+
+class _Clock:
+    """Stands in for the poller's `datetime` so `datetime.now(...)` returns a fixed time."""
+
+    def __init__(self, now):
+        self._now = now
+
+    def now(self, tz=None):
+        return self._now

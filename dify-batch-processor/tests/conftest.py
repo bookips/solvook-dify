@@ -91,6 +91,7 @@ class FakeDB:
         self.cursor_obj = MagicMock()
         self.cursor_obj.execute.side_effect = lambda sql, params=None: self.executed.append((sql, params))
         self.cursor_obj.fetchone.return_value = fetchone
+        self.cursor_obj.rowcount = 1  # 0 = ON CONFLICT ... WHERE skipped the update
         self.conn = MagicMock()
         self.conn.cursor.return_value.__enter__.return_value = self.cursor_obj
         self.conn.cursor.return_value.__exit__.return_value = False

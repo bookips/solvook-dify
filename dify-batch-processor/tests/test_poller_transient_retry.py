@@ -2,6 +2,7 @@
 
 See docs/plans/2026-11-20-batch-poller-transient-retry.md, section 4.1.
 """
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,14 +101,30 @@ def test_missing_retry_count_key_is_treated_as_zero(poller):
 @pytest.mark.parametrize(
     "error",
     [
-        "no available node",
-        "plugin runtime not found",
+        PLUGIN_COLD_START_ERROR,
         "PluginDaemonInternalServerError: no available node, plugin runtime not found",
+        "plugin runtime not found; no available node",
     ],
 )
-def test_each_allowlisted_marker_is_retryable_on_its_own(poller, error):
+def test_both_markers_together_are_retryable(poller, error):
     calls = run_poller(poller, [make_job("j1")], {"j1": dify_response("failed", error)})
     assert written(calls["j1"])[0] == "PENDING"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        # e.g. a model provider or load balancer reporting "no available node"
+        "upstream error: no available node for model gpt-x",
+        "plugin runtime not found",
+    ],
+)
+def test_one_marker_alone_is_not_retried(poller, error):
+    """Decision 2026-11-20: require both markers so unrelated errors are not re-run."""
+    calls = run_poller(poller, [make_job("j1")], {"j1": dify_response("failed", error)})
+    status, data = written(calls["j1"])
+    assert status == "FAILED"
+    assert "retry_count" not in data
 
 
 # --- 3, 5: non-retryable or exhausted failures stay FAILED -----------------
@@ -187,3 +204,48 @@ def test_success_statuses_mark_success(poller, status):
 def test_running_job_is_left_untouched(poller):
     calls = run_poller(poller, [make_job("j1")], {"j1": dify_response("running")})
     assert calls == {}
+
+
+# --- every poller write is conditional on the snapshot it read -------------------
+
+GUARD_SCENARIOS = {
+    "succeeded": dict(response=dify_response("succeeded")),
+    "failed -> PENDING": dict(response=dify_response("failed", PLUGIN_COLD_START_ERROR)),
+    "failed -> FAILED": dict(response=dify_response("failed", "Variable passage is required")),
+    "polling error": dict(response="raise"),
+    "processing timeout, S3 missing": dict(minutes_old=31, s3=False),
+    "processing timeout, S3 found": dict(minutes_old=31, s3=True),
+    "no run id timeout": dict(minutes_old=16, run_id=None, s3=False),
+}
+
+
+@pytest.mark.parametrize("scenario", GUARD_SCENARIOS)
+def test_every_poller_write_expects_the_snapshot_it_read(poller, monkeypatch, scenario):
+    spec = GUARD_SCENARIOS[scenario]
+    snapshot_ts = datetime.now(timezone.utc) - timedelta(minutes=spec.get("minutes_old", 0))
+    job = make_job("j1", workflow_run_id=spec.get("run_id", "run-1"), timestamp=snapshot_ts)
+    monkeypatch.setattr(poller.Config, "PROCESSING_TIMEOUT_MINUTES", 30)
+    monkeypatch.setattr(poller.Config, "PROCESSING_NO_RUNID_TIMEOUT_MINUTES", 15)
+    monkeypatch.setattr(poller.Config, "HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID", job.get("workflow_id"))
+    poller.check_object_exists = MagicMock(return_value=spec.get("s3", False))
+    poller.get_entities_from_datastore = MagicMock(return_value=[job])
+    if spec.get("response") == "raise":
+        poller.requests.get = MagicMock(side_effect=RuntimeError("Dify 502"))
+    else:
+        poller.requests.get = MagicMock(return_value=spec.get("response"))
+
+    poller.main(None)
+
+    [call] = poller.update_datastore.call_args_list
+    assert call.kwargs.get("expect") == {"status": "PROCESSING", "timestamp": snapshot_ts}
+
+
+def test_skipped_conditional_write_is_not_an_error(poller):
+    """Row changed under us (another run already handled it): poller carries on."""
+    poller.update_datastore = MagicMock(return_value=False)
+    run_poller(
+        poller,
+        [make_job("j1", workflow_run_id="r1"), make_job("j2", workflow_run_id="r2")],
+        {"j1": dify_response("failed", PLUGIN_COLD_START_ERROR), "j2": dify_response("succeeded")},
+    )
+    assert poller.update_datastore.call_count == 2
