@@ -63,7 +63,7 @@ PROCESSING ──(poller: 그 외 failed, 또는 상한 도달)──▶ FAILED 
 - poller(3분)와 dispatcher(1분) 주기 때문에 재실행까지 최소 1~4분이 걸린다. 플러그인 준비 시간(약 98초)보다 길기 때문에 별도 backoff는 넣지 않는다.
 
 ### 재시도 대상 판정
-Dify run 응답의 `error` 문자열에 아래 중 하나가 포함되면 재시도 대상으로 본다(허용 목록 방식).
+Dify run 응답의 `error` 문자열에 아래 두 문구가 **모두** 포함되면 재시도 대상으로 본다(허용 목록 방식). 처음에는 "둘 중 하나"였으나, 코드 리뷰 후 2026-11-20에 좁혔다. `no available node`는 무관한 컴포넌트의 에러에도 나올 수 있는데, 잘못 재시도하면 워크플로우 전체를 다시 돌려 비용이 든다. 판정을 놓쳐도 결과는 지금처럼 `FAILED`일 뿐이다.
 
 - `no available node`
 - `plugin runtime not found`
@@ -74,6 +74,11 @@ Dify run 응답의 `error` 문자열에 아래 중 하나가 포함되면 재시
 - 새 컬럼 `retry_count`로 횟수를 기록한다. 상한이 없으면 실패가 반복될 때 무한히 재투입된다.
 - 상한은 `MAX_TRANSIENT_RETRIES` 환경변수로 받는다. 기본값은 **2** 이다. `0`이면 재시도하지 않는다.
 - 시트에서 다시 실행하면(loader가 FAILED 행을 PENDING으로 올리는 경우) `retry_count`를 0으로 초기화한다.
+
+### 조건부 쓰기 (2026-11-20 리뷰 후 추가)
+- 재시도로 PROCESSING → PENDING → PROCESSING 순환이 생겼다. 그래서 poller가 예전에 조회한 행으로 쓰면 새 실행을 재투입하거나 FAILED로 덮어쓸 수 있다.
+- poller의 모든 쓰기는 `update_datastore(..., expect={"status": "PROCESSING", "timestamp": <조회한 값>})`로 한다. SQL은 `ON CONFLICT ... DO UPDATE ... WHERE ... IS NOT DISTINCT FROM`이고, NULL timestamp도 일치로 본다. 조건이 맞지 않으면 쓰지 않는다.
+- 지금 설정(poller 인스턴스 1개, 한 번에 조회하는 행 최대 2개)에서는 겹칠 일이 사실상 없다. 그래도 순환이 생긴 이상 코드로 막아 둔다. AST 정적 감사 테스트가 `expect=` 없는 poller 쓰기를 잡는다.
 
 ## 3. 변경 목록
 
@@ -88,6 +93,7 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
 - `_KNOWN_COLUMNS`에 `retry_count`를 추가한다.
   - **주의:** 목록에 없는 키는 에러 없이 버려진다. 이 항목이 빠지면 `retry_count`가 늘 0으로 남아 무한 재시도가 된다.
 - `check_and_upsert_status`의 `known_cols`에도 `retry_count`를 추가한다. 위 목록과 별도로 관리되는 중복 목록이다.
+  - (2026-11-20 리뷰 후) 중복 목록을 없애고 `_KNOWN_COLUMNS`에서 파생한 `_DATA_COLUMNS`를 쓰도록 바꿨다.
 
 ### 3.3 `poller/main.py`, `poller/config.py`
 - `is_retryable(error_message) -> bool` 함수를 추가한다.
@@ -143,8 +149,11 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
 스테이징은 파일 경로를 지정해서 한다.
 
 ## 6. 배포 순서
-1. 운영 DB에 `ALTER TABLE` 적용
-   - **반드시 poller보다 먼저 적용한다.** 순서가 바뀌면 `update_datastore`가 예외를 삼켜 행이 `PROCESSING`에 머물고, 30분 타임아웃 뒤 `FAILED`가 된다.
+1. 운영 DB에 [scripts/sql/2026-11-20-add-retry-count.sql](../../dify-batch-processor/scripts/sql/2026-11-20-add-retry-count.sql) 적용 (Cloud SQL Studio, 여러 번 실행해도 안전)
+   - **반드시 함수 배포보다 먼저 적용한다.** 순서가 바뀌면:
+     - **loader**: 모든 실행이 첫 행에서 `column retry_count does not exist`로 500이 난다. 시트의 어떤 행도 큐에 들어가지 않는다.
+     - **poller**: `update_datastore`가 예외를 삼켜 행이 `PROCESSING`에 머물고, 30분 타임아웃 뒤 `FAILED`가 된다.
+   - `migrate_datastore_to_postgres.py`로 스키마를 맞추지 않는다. `CREATE TABLE IF NOT EXISTS`라서 기존 테이블에는 아무 일도 하지 않고, Datastore 데이터를 다시 가져오는 스크립트다.
 2. `terraform apply`로 재배포. 코드가 바뀐 것은 poller와 loader지만, 4개 함수(loader·dispatcher·worker·poller)의 zip에 모두 `shared/utils.py`가 들어가므로 네 함수가 모두 다시 배포된다.
 3. 4.3 확인
 

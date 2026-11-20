@@ -56,9 +56,11 @@ PROCESSING ──(failed, 재시도 대상 에러, retry_count < 상한)──�
 PROCESSING ──(그 외 failed, 또는 상한 도달)──────────────────▶ FAILED
 ```
 
--   **재시도 대상**: Dify run의 `error`에 `no available node` 또는 `plugin runtime not found`가 들어 있는 경우만 해당합니다. 그 밖의 실패는 바로 `FAILED`입니다.
--   **상한**: poller 환경 변수 `MAX_TRANSIENT_RETRIES`(기본 2, `0`이면 재시도하지 않음). 횟수는 `retry_count` 컬럼에 기록됩니다.
+-   **재시도 대상**: Dify run의 `error`에 `no available node`와 `plugin runtime not found`가 **모두** 들어 있는 경우만 해당합니다. 한쪽 문구만 있는 에러를 포함해 그 밖의 실패는 바로 `FAILED`입니다. 재시도는 워크플로우를 처음부터 다시 실행해 LLM 비용이 다시 들기 때문에 좁게 잡았습니다.
+-   **상한**: poller 환경 변수 `MAX_TRANSIENT_RETRIES`(기본 2, `0`이면 재시도하지 않음). 횟수는 `retry_count` 컬럼에 기록됩니다. 지금 terraform 모듈은 이 변수를 넘기지 않으므로 코드 기본값 2가 쓰입니다. 값을 바꾸려면 `terraform/modules/dify_batch_processor/main.tf`의 poller `environment_variables`에 추가하고 apply해야 합니다. 콘솔이나 gcloud로 바꾼 값은 다음 apply 때 사라집니다.
 -   **재투입**: 행을 `PENDING`으로 바꾸고 `workflow_run_id`를 비웁니다. `data`와 `workflow_id`는 그대로 남으므로 dispatcher가 같은 입력으로 워크플로우를 **처음부터** 다시 실행합니다. `message`에는 `Transient retry N/상한: <원래 에러>`가 남습니다. 재시도 후 성공해도 성공 처리는 `result`만 바꾸므로, 이 메시지는 재시도 이력으로 그대로 남습니다.
+-   **조건부 쓰기**: poller는 조회한 시점의 행(`status = PROCESSING`, 같은 `timestamp`)이 그대로일 때만 결과를 씁니다. 그 사이 다른 실행이 행을 바꿨다면 쓰지 않고 `Skipped writing status ...` 경고만 남깁니다. 재투입된 행이 다시 PROCESSING이 되므로, 예전 조회 결과로 새 실행을 덮어쓰지 않게 하기 위해서입니다.
+-   **스키마**: `retry_count` 컬럼이 필요합니다. 배포 **전에** `scripts/sql/2026-11-20-add-retry-count.sql`을 운영 DB에 적용하세요. 컬럼이 없으면 loader가 매번 500으로 실패합니다.
 -   **초기화**: 시트에서 다시 실행하면(loader가 `PENDING`으로 올리면) `retry_count`는 0으로 돌아갑니다.
 -   재실행까지는 poller(3분)·dispatcher(1분) 주기 때문에 1~4분이 걸립니다.
 
