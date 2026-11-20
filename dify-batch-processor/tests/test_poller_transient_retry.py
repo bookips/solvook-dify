@@ -140,14 +140,16 @@ def test_other_failures_are_failed_immediately(poller, error):
     assert "retry_count" not in data
 
 
-def test_failure_with_null_error_is_failed(poller):
+def test_failure_with_null_error_is_failed_with_default_message(poller):
     calls = run_poller(poller, [make_job("j1")], {"j1": dify_response("failed", None)})
     assert written(calls["j1"])[0] == "FAILED"
+    assert written(calls["j1"])[1]["message"] == "Dify workflow failed."
 
 
-def test_failure_without_error_key_is_failed(poller):
+def test_failure_without_error_key_is_failed_with_default_message(poller):
     calls = run_poller(poller, [make_job("j1")], {"j1": dify_response("failed", omit_error=True)})
     assert written(calls["j1"])[0] == "FAILED"
+    assert written(calls["j1"])[1]["message"] == "Dify workflow failed."
 
 
 # --- retry limit configuration (default / disabled) -------------------------

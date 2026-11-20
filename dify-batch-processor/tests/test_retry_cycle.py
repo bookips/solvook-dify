@@ -1,6 +1,8 @@
 """Second-round tests: axes the transient-retry implementation created.
 
 - The poller now writes PENDING, which feeds the row back through dispatcher -> worker.
+  The cycle tests run the real dispatcher.main and worker.main; only the table,
+  Cloud Tasks and Dify's HTTP responses are stand-ins.
 - One poller run now branches three ways on `failed` rows.
 - retry_count now travels through update_datastore from the poller.
 
@@ -96,12 +98,34 @@ def dispatch(dispatcher):
     ]
 
 
-def worker_starts(table, unique_id, workflow_id, run_id):
-    """What worker/main.py writes after `workflow_started` (run_id None = not captured)."""
-    data = {"workflow_id": workflow_id}
+@pytest.fixture
+def worker(monkeypatch, table):
+    module = load_function("worker", monkeypatch)
+    module.update_datastore = table.update_datastore
+    return module
+
+
+def worker_starts(worker, payload, run_id):
+    """Run the real worker.main on a dispatched task payload.
+
+    Dify's streaming response is mocked: it emits `workflow_started` with ``run_id``,
+    or only an unrelated event when ``run_id`` is None (run id not captured).
+    """
     if run_id:
-        data["workflow_run_id"] = run_id
-    table.update_datastore(unique_id, "PROCESSING", data=data)
+        event = {"event": "workflow_started", "workflow_run_id": run_id}
+    else:
+        event = {"event": "ping"}
+    stream = MagicMock()
+    stream.raise_for_status.return_value = None
+    stream.iter_lines.return_value = [f"data: {json.dumps(event)}".encode()]
+    worker.requests.post = MagicMock(return_value=stream)
+
+    request = MagicMock()
+    request.method = "POST"
+    request.get_json.return_value = payload
+
+    body, code = worker.main(request)
+    assert code == 202, body
 
 
 def poll(poller, status_by_run_id):
@@ -113,23 +137,24 @@ def poll(poller, status_by_run_id):
     return poller.requests.get
 
 
-def run_attempt(dispatcher, poller, table, run_id, response):
+def run_attempt(dispatcher, worker, poller, table, run_id, response):
     [payload] = dispatch(dispatcher)
     assert table.rows["j1"]["status"] == "QUEUED"
-    worker_starts(table, payload["unique_id"], payload["workflow_id"], run_id)
+    worker_starts(worker, payload, run_id)
+    assert table.rows["j1"]["status"] == "PROCESSING"
     poll(poller, {run_id: response})
     return payload
 
 
 # --- requeued row goes back through dispatcher with its inputs intact ----------
 
-def test_requeued_row_is_redispatched_with_original_inputs(dispatcher, poller, table):
+def test_requeued_row_is_redispatched_with_original_inputs(dispatcher, worker, poller, table):
     cold = dify_response("failed", PLUGIN_COLD_START_ERROR)
 
-    first = run_attempt(dispatcher, poller, table, "run-1", cold)
+    first = run_attempt(dispatcher, worker, poller, table, "run-1", cold)
     assert table.rows["j1"]["status"] == "PENDING"
 
-    second = run_attempt(dispatcher, poller, table, "run-2", dify_response("succeeded"))
+    second = run_attempt(dispatcher, worker, poller, table, "run-2", dify_response("succeeded"))
 
     assert second == first
     assert second["data"] == INPUTS
@@ -138,27 +163,27 @@ def test_requeued_row_is_redispatched_with_original_inputs(dispatcher, poller, t
     assert table.rows["j1"]["retry_count"] == 1
 
 
-def test_retry_budget_survives_dispatcher_and_worker_and_stops_at_limit(dispatcher, poller, table):
+def test_retry_budget_survives_dispatcher_and_worker_and_stops_at_limit(dispatcher, worker, poller, table):
     cold = dify_response("failed", PLUGIN_COLD_START_ERROR)
 
     for attempt in range(1, MAX_RETRIES + 1):
-        run_attempt(dispatcher, poller, table, f"run-{attempt}", cold)
+        run_attempt(dispatcher, worker, poller, table, f"run-{attempt}", cold)
         assert table.rows["j1"]["status"] == "PENDING"
         assert table.rows["j1"]["retry_count"] == attempt
 
-    run_attempt(dispatcher, poller, table, "run-last", cold)
+    run_attempt(dispatcher, worker, poller, table, "run-last", cold)
     assert table.rows["j1"]["status"] == "FAILED"
     assert table.rows["j1"]["retry_count"] == MAX_RETRIES
     assert dispatch(dispatcher) == []
 
 
-def test_retry_without_captured_run_id_does_not_repoll_the_old_failed_run(dispatcher, poller, table):
+def test_retry_without_captured_run_id_does_not_repoll_the_old_failed_run(dispatcher, worker, poller, table):
     """If the worker misses workflow_started, the stale run id must not be polled again."""
-    run_attempt(dispatcher, poller, table, "run-1", dify_response("failed", PLUGIN_COLD_START_ERROR))
+    run_attempt(dispatcher, worker, poller, table, "run-1", dify_response("failed", PLUGIN_COLD_START_ERROR))
     assert table.rows["j1"]["workflow_run_id"] is None
 
     [payload] = dispatch(dispatcher)
-    worker_starts(table, payload["unique_id"], payload["workflow_id"], run_id=None)
+    worker_starts(worker, payload, run_id=None)
     get = poll(poller, {})
 
     get.assert_not_called()
