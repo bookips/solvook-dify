@@ -145,7 +145,7 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
 ## 6. 배포 순서
 1. 운영 DB에 `ALTER TABLE` 적용
    - **반드시 poller보다 먼저 적용한다.** 순서가 바뀌면 `update_datastore`가 예외를 삼켜 행이 `PROCESSING`에 머물고, 30분 타임아웃 뒤 `FAILED`가 된다.
-2. `terraform apply`로 poller와 loader 재배포
+2. `terraform apply`로 재배포. 코드가 바뀐 것은 poller와 loader지만, 4개 함수(loader·dispatcher·worker·poller)의 zip에 모두 `shared/utils.py`가 들어가므로 네 함수가 모두 다시 배포된다.
 3. 4.3 확인
 
 롤백: poller를 이전 버전으로 재배포한다. 컬럼은 남겨 둬도 기존 코드에 영향이 없다.

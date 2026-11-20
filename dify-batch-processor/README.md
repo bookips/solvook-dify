@@ -58,7 +58,7 @@ PROCESSING ──(그 외 failed, 또는 상한 도달)────────�
 
 -   **재시도 대상**: Dify run의 `error`에 `no available node` 또는 `plugin runtime not found`가 들어 있는 경우만 해당합니다. 그 밖의 실패는 바로 `FAILED`입니다.
 -   **상한**: poller 환경 변수 `MAX_TRANSIENT_RETRIES`(기본 2, `0`이면 재시도하지 않음). 횟수는 `retry_count` 컬럼에 기록됩니다.
--   **재투입**: 행을 `PENDING`으로 바꾸고 `workflow_run_id`를 비웁니다. `data`와 `workflow_id`는 그대로 남으므로 dispatcher가 같은 입력으로 워크플로우를 **처음부터** 다시 실행합니다. `message`에는 `Transient retry N/상한: <원래 에러>`가 남습니다.
+-   **재투입**: 행을 `PENDING`으로 바꾸고 `workflow_run_id`를 비웁니다. `data`와 `workflow_id`는 그대로 남으므로 dispatcher가 같은 입력으로 워크플로우를 **처음부터** 다시 실행합니다. `message`에는 `Transient retry N/상한: <원래 에러>`가 남습니다. 재시도 후 성공해도 성공 처리는 `result`만 바꾸므로, 이 메시지는 재시도 이력으로 그대로 남습니다.
 -   **초기화**: 시트에서 다시 실행하면(loader가 `PENDING`으로 올리면) `retry_count`는 0으로 돌아갑니다.
 -   재실행까지는 poller(3분)·dispatcher(1분) 주기 때문에 1~4분이 걸립니다.
 
