@@ -1,7 +1,7 @@
 # Batch Processor: 플러그인 콜드 스타트 실패 자동 재시도
 
 - 작성일: 2026-11-20
-- 상태: **구현 완료(브랜치 `feat/poller-transient-retry`).** 2026-11-20 운영 DB에 `retry_count` ALTER 적용, 조건부 쓰기 확인 스크립트 통과. **`terraform apply` 전** — §6 배포 순서 참고
+- 상태: **구현 완료(브랜치 `feat/poller-transient-retry`).** 2026-11-20 운영 DB에 `retry_count` ALTER 적용, 조건부 쓰기 확인 스크립트 통과, `terraform apply`로 4개 함수 배포(poller `00029`, dispatcher `00010`, worker `00031`, loader `00043`). **남은 것: §4.3 다음 콜드 스타트 때 재시도 확인**
 - 대상: `dify-batch-processor` (poller, shared, loader), 운영 DB `batch_process_status`
 
 ## 1. 배경
