@@ -204,6 +204,8 @@ def main(request: dict):
                             data={
                                 'data': json.dumps(input_data, ensure_ascii=False),
                                 'workflow_id': Config.DIFY_WORKFLOW_IDS_BY_CURRICULUM_AND_CONTENT_CATEGORY.get(curriculum).get(each),
+                                # A run queued from the sheet gets a fresh transient-retry budget.
+                                'retry_count': 0,
                             },
                             force=force,
                         )

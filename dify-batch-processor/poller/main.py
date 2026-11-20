@@ -35,7 +35,34 @@ def check_object_exists(bucket: str, object_name: str) -> bool:
         return False
 
 
-def handle_timeout(unique_id: str, workflow_id: str, job_data: dict, elapsed_minutes: int = None):
+# Substrings of a Dify run `error` that mean the plugin daemon was not ready yet
+# (cold start: plugins are still being launched). ALL must appear: "no available node"
+# alone can come from unrelated components, and a wrong retry re-runs the whole
+# workflow. Anything else is FAILED.
+TRANSIENT_ERROR_MARKERS = (
+    "no available node",
+    "plugin runtime not found",
+)
+
+
+def is_retryable(error_message: str | None) -> bool:
+    """True when a failed run's error is a transient plugin-daemon error worth re-running."""
+    if not error_message:
+        return False
+    return all(marker in error_message for marker in TRANSIENT_ERROR_MARKERS)
+
+
+def snapshot_guard(job) -> dict:
+    """Condition for writing a PROCESSING row the poller read earlier.
+
+    The write applies only if the row is still the version that was read. Once a
+    re-queued row is dispatched again it gets a new timestamp, so a poller acting on
+    an old snapshot cannot overwrite the newer run.
+    """
+    return {"status": "PROCESSING", "timestamp": job.get("timestamp")}
+
+
+def handle_timeout(unique_id: str, workflow_id: str, job_data: dict, expect: dict, elapsed_minutes: int = None):
     """Handles jobs that have timed out."""
     minutes = elapsed_minutes or Config.PROCESSING_TIMEOUT_MINUTES
     logging.warning(f"[{unique_id}] Job has been in 'PROCESSING' state for over {minutes} minute(s)")
@@ -51,14 +78,14 @@ def handle_timeout(unique_id: str, workflow_id: str, job_data: dict, elapsed_min
             object_name = f"passage-workbook/{passage_group_id}/{passage_id}/result.json"
 
     if object_name is None:
-        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out, but workflow_id '{workflow_id}' is unknown or data is missing."})
+        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out, but workflow_id '{workflow_id}' is unknown or data is missing."}, expect=expect)
         return
 
     logging.info(f"[{unique_id}] Checking for result object in S3: s3://{Config.AWS_S3_BUCKET}/{object_name}")                        
     if check_object_exists(Config.AWS_S3_BUCKET, object_name):
-        update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"})
+        update_datastore(unique_id, 'SUCCESS', data={"message": f"Found s3://{Config.AWS_S3_BUCKET}/{object_name}"}, expect=expect)
     else:
-        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {minutes} minute(s)."})
+        update_datastore(unique_id, 'FAILED', data={"message": f"Job timed out in poller after {minutes} minute(s)."}, expect=expect)
 
 
 @functions_framework.http
@@ -78,6 +105,7 @@ def main(request: dict):
         unique_id = job.key.name
         workflow_run_id = job.get("workflow_run_id")
         workflow_id = job.get("workflow_id")
+        expect = snapshot_guard(job)
 
         # Timeout logic
         last_updated = job.get("timestamp")
@@ -92,7 +120,7 @@ def main(request: dict):
             
             if time_difference > timedelta(minutes=Config.PROCESSING_TIMEOUT_MINUTES):
                 job_data = json.loads(job.get("data", "{}"))
-                handle_timeout(unique_id, workflow_id, job_data)
+                handle_timeout(unique_id, workflow_id, job_data, expect)
                 continue
 
         if not workflow_run_id and workflow_id:
@@ -103,7 +131,7 @@ def main(request: dict):
                     elapsed_min = int(no_runid_elapsed.total_seconds() / 60)
                     logging.warning(f"[{unique_id}] Job missing 'workflow_run_id' for {elapsed_min} minute(s). Checking S3 for results.")
                     job_data = json.loads(job.get("data", "{}"))
-                    handle_timeout(unique_id, workflow_id, job_data, elapsed_minutes=elapsed_min)
+                    handle_timeout(unique_id, workflow_id, job_data, expect, elapsed_minutes=elapsed_min)
                 else:
                     logging.info(f"[{unique_id}] Job missing 'workflow_run_id', waiting for no-runid timeout ({Config.PROCESSING_NO_RUNID_TIMEOUT_MINUTES}m).")
             continue
@@ -128,16 +156,30 @@ def main(request: dict):
 
             if workflow_status == "succeeded" or workflow_status == "partial-succeeded":
                 logging.info(f"[{unique_id}] Workflow run {workflow_run_id} succeeded.")
-                update_datastore(unique_id, 'SUCCESS', data={"result": str(data)})
+                update_datastore(unique_id, 'SUCCESS', data={"result": str(data)}, expect=expect)
             elif workflow_status == "failed":
-                logging.error(f"[{unique_id}] Workflow run {workflow_run_id} failed.")
-                error_message = data.get("error", "Dify workflow failed.")
-                update_datastore(unique_id, 'FAILED', data={"message": error_message, "result": str(data)})
+                error_message = data.get("error") or "Dify workflow failed."
+                retry_count = job.get("retry_count") or 0
+                if is_retryable(error_message) and retry_count < Config.MAX_TRANSIENT_RETRIES:
+                    attempt = retry_count + 1
+                    logging.warning(
+                        f"[{unique_id}] Workflow run {workflow_run_id} failed with a transient plugin error. "
+                        f"Re-queuing as PENDING (retry {attempt}/{Config.MAX_TRANSIENT_RETRIES})."
+                    )
+                    update_datastore(unique_id, 'PENDING', data={
+                        "workflow_run_id": None,
+                        "retry_count": attempt,
+                        "message": f"Transient retry {attempt}/{Config.MAX_TRANSIENT_RETRIES}: {error_message}",
+                        "result": str(data),
+                    }, expect=expect)
+                else:
+                    logging.error(f"[{unique_id}] Workflow run {workflow_run_id} failed.")
+                    update_datastore(unique_id, 'FAILED', data={"message": error_message, "result": str(data)}, expect=expect)
             else:
                 logging.info(f"[{unique_id}] Workflow run {workflow_run_id} is still in progress (status: {workflow_status}).")
 
         except Exception as e:
             logging.error(f"[{unique_id}] An unexpected error occurred for workflow {workflow_run_id}: {e}", exc_info=True)
-            update_datastore(unique_id, 'FAILED', data={"message": f"Polling failed: {e}"})
+            update_datastore(unique_id, 'FAILED', data={"message": f"Polling failed: {e}"}, expect=expect)
 
     return f"Polled {len(processing_jobs)} jobs.", 200

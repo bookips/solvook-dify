@@ -14,8 +14,11 @@ TABLE_NAME = "batch_process_status"
 # always handled). Any key in the `data` dict that matches a column name is written
 # directly; unknown keys are silently ignored.
 _KNOWN_COLUMNS = frozenset(
-    {"unique_id", "status", "workflow_id", "workflow_run_id", "data", "result", "message", "timestamp"}
+    {"unique_id", "status", "workflow_id", "workflow_run_id", "data", "result", "message", "timestamp", "retry_count"}
 )
+# Columns a caller may set through `data`; unique_id/status/timestamp are set explicitly.
+# Derived, not listed again, so a new column cannot be added to one writer only.
+_DATA_COLUMNS = _KNOWN_COLUMNS - {"unique_id", "status", "timestamp"}
 
 
 def get_db_connection():
@@ -74,10 +77,9 @@ def check_and_upsert_status(
         columns = ["unique_id", "status", "timestamp"]
         values: list = [unique_id, new_status, datetime.now(timezone.utc)]
 
-        known_cols = {"workflow_id", "workflow_run_id", "data", "result", "message"}
         if data:
             for k, v in data.items():
-                if k in known_cols:
+                if k in _DATA_COLUMNS:
                     columns.append(k)
                     values.append(v)
 
@@ -149,7 +151,8 @@ def update_datastore(
     status: str,
     data: dict | None = None,
     excluded_from_indexes: tuple = ("result", "message", "data"),
-):
+    expect: dict | None = None,
+) -> bool:
     """
     Upserts a row in the batch_process_status table.
 
@@ -158,7 +161,21 @@ def update_datastore(
         status: The new status to set.
         data: A dictionary of other fields to set or update on the row.
         excluded_from_indexes: Kept for backward compatibility; ignored in PostgreSQL.
+        expect: Optional {column: value} the existing row must still match for the
+            update to apply (compared with IS NOT DISTINCT FROM, so None matches NULL).
+            Used by the poller, which writes from a snapshot read earlier: since a
+            row can go PROCESSING -> PENDING -> PROCESSING, a stale snapshot must not
+            overwrite a newer run. Pass the status and timestamp that were read.
+
+    Returns:
+        True when the row was written. False when an ``expect`` condition no longer
+        matched (the update was skipped) or the database call failed (logged).
     """
+    expect = expect or {}
+    unknown = set(expect) - _KNOWN_COLUMNS
+    if unknown:
+        raise ValueError(f"Unknown columns in expect: {sorted(unknown)}")
+
     try:
         # Build the payload: always include status and timestamp
         payload = {
@@ -182,18 +199,33 @@ def update_datastore(
             f"VALUES ({', '.join(placeholders)}) "
             f"ON CONFLICT (unique_id) DO UPDATE SET {update_clause}"
         )
+        params = dict(payload)
+        if expect:
+            conditions = []
+            for c, v in expect.items():
+                conditions.append(f"{TABLE_NAME}.{c} IS NOT DISTINCT FROM %(expect_{c})s")
+                params[f"expect_{c}"] = v
+            sql += " WHERE " + " AND ".join(conditions)
 
         conn = get_db_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(sql, payload)
+                cur.execute(sql, params)
+                applied = cur.rowcount == 1
             conn.commit()
         finally:
             conn.close()
 
-        logging.info(f"[{unique_id}] Database row upserted with status '{status}'.")
+        if applied:
+            logging.info(f"[{unique_id}] Database row upserted with status '{status}'.")
+        else:
+            logging.warning(
+                f"[{unique_id}] Skipped writing status '{status}': row no longer matches {expect}."
+            )
+        return applied
     except Exception as e:
         logging.error(f"[{unique_id}] Failed to update database: {e}", exc_info=True)
+        return False
 
 
 # Whitelist of fields that may be queried to prevent SQL injection via column names.

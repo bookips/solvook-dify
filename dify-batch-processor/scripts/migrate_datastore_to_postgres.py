@@ -11,6 +11,9 @@ from psycopg2.extras import execute_values
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
+# Schema for a fresh database only. CREATE TABLE IF NOT EXISTS does nothing on the
+# existing production table, and this script also re-imports Datastore data, so do
+# not run it to upgrade the schema; apply the files in scripts/sql/ instead.
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS batch_process_status (
     unique_id TEXT PRIMARY KEY,
@@ -20,7 +23,8 @@ CREATE TABLE IF NOT EXISTS batch_process_status (
     data TEXT,
     result TEXT,
     message TEXT,
-    timestamp TIMESTAMPTZ DEFAULT NOW()
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    retry_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_bps_status ON batch_process_status(status);
 """
