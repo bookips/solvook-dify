@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS batch_process_status (
     data TEXT,
     result TEXT,
     message TEXT,
-    timestamp TIMESTAMPTZ DEFAULT NOW()
+    timestamp TIMESTAMPTZ DEFAULT NOW(),
+    retry_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_bps_status ON batch_process_status(status);
 """

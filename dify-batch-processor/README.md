@@ -42,8 +42,25 @@ graph TD
 -   **Cloud Run (Dispatcher)**: 1분마다 트리거됩니다. Firestore에서 `PROCESSING` 상태인 작업 수를 확인하여 현재 시스템 부하를 파악하고, 설정된 최대 동시 실행 수(`max_concurrent_workflows`)에 맞춰 처리 가능한 만큼의 `PENDING` 작업에 대한 Cloud Tasks를 생성합니다. 태스크가 생성된 작업은 **`QUEUED`** 상태로 변경됩니다.
 -   **Cloud Tasks**: `Dispatcher`로부터 받은 태스크를 큐에 저장하고, `Worker`에게 안전하게 전달합니다.
 -   **Cloud Run (Worker)**: Cloud Tasks로부터 태스크를 받아 Dify API를 비동기 스트리밍 모드로 호출하여 워크플로우 실행을 시작합니다. Dify로부터 받은 `workflow_run_id`를 Firestore에 저장하고 상태를 **`PROCESSING`**으로 변경한 후 즉시 종료됩니다.
--   **Cloud Run (Poller)**: 3분마다 트리거됩니다. Firestore에서 `PROCESSING` 상태인 작업을 조회하고, `workflow_run_id`를 사용하여 Dify API에 작업 진행 상태를 문의(Polling)합니다. 작업이 완료(`succeeded` 또는 `failed`)되었으면 최종 결과를 Firestore에 업데이트합니다.
+-   **Cloud Run (Poller)**: 3분마다 트리거됩니다. Firestore에서 `PROCESSING` 상태인 작업을 조회하고, `workflow_run_id`를 사용하여 Dify API에 작업 진행 상태를 문의(Polling)합니다. 작업이 완료(`succeeded` 또는 `failed`)되었으면 최종 결과를 Firestore에 업데이트합니다. 단, 플러그인 콜드 스타트로 인한 일시적 실패는 `FAILED` 대신 `PENDING`으로 되돌려 다시 실행합니다(아래 2.3).
 -   **Firestore (Datastore Mode)**: 각 데이터의 처리 상태(`PENDING`, `QUEUED`, `PROCESSING`, `SUCCESS`, `FAILED`)와 `workflow_run_id` 등 모든 관련 데이터를 저장하고 관리합니다.
+
+### 2.3. 일시적 실패 자동 재시도
+
+> 상태 저장소는 현재 PostgreSQL `batch_process_status` 테이블입니다. 이 문서의 Firestore 표기는 옛 내용입니다.
+
+Dify 인스턴스가 0대에서 새로 뜬 직후 약 90초 동안은 플러그인이 아직 준비되지 않아, 워크플로우가 `no available node, plugin runtime not found` 에러로 실패할 수 있습니다. Poller는 이 실패를 다음과 같이 처리합니다.
+
+```
+PROCESSING ──(failed, 재시도 대상 에러, retry_count < 상한)──▶ PENDING ─▶ dispatcher ─▶ QUEUED ─▶ worker ─▶ PROCESSING
+PROCESSING ──(그 외 failed, 또는 상한 도달)──────────────────▶ FAILED
+```
+
+-   **재시도 대상**: Dify run의 `error`에 `no available node` 또는 `plugin runtime not found`가 들어 있는 경우만 해당합니다. 그 밖의 실패는 바로 `FAILED`입니다.
+-   **상한**: poller 환경 변수 `MAX_TRANSIENT_RETRIES`(기본 2, `0`이면 재시도하지 않음). 횟수는 `retry_count` 컬럼에 기록됩니다.
+-   **재투입**: 행을 `PENDING`으로 바꾸고 `workflow_run_id`를 비웁니다. `data`와 `workflow_id`는 그대로 남으므로 dispatcher가 같은 입력으로 워크플로우를 **처음부터** 다시 실행합니다. `message`에는 `Transient retry N/상한: <원래 에러>`가 남습니다.
+-   **초기화**: 시트에서 다시 실행하면(loader가 `PENDING`으로 올리면) `retry_count`는 0으로 돌아갑니다.
+-   재실행까지는 poller(3분)·dispatcher(1분) 주기 때문에 1~4분이 걸립니다.
 
 ## 3. 설정 및 배포 (Terraform)
 
@@ -147,11 +164,20 @@ Terraform 배포 시 생성되는 커스텀 대시보드에서 `loader`, `dispat
     ```
     이 명령어는 `.env.example` 파일을 복사하여 `.env` 파일을 생성합니다. 생성된 `.env` 파일을 열어 `YOUR_...`로 표시된 값들을 실제 프로젝트에 맞게 수정해야 합니다.
 
-### 4.3. 로컬 코드와 실제 GCP 리소스 연동 테스트 (하이브리드)
+### 4.3. 단위 테스트
+
+`tests/`의 테스트는 DB·Dify·Secret Manager를 모두 mock하며, 로컬 `.env`도 읽지 않습니다.
+
+```bash
+poetry install --with dev
+poetry run pytest
+```
+
+### 4.4. 로컬 코드와 실제 GCP 리소스 연동 테스트 (하이브리드)
 
 로컬에서 코드를 수정하면서 Firestore 에뮬레이터가 아닌, **실제로 GCP에 배포된 Datastore와 Cloud Tasks 리소스와 연동**하여 테스트할 수 있습니다. 이 방식은 보다 현실적인 환경에서 각 서비스의 상호작용을 검증할 때 유용합니다.
 
-#### 4.3.1. 사전 준비 사항
+#### 4.4.1. 사전 준비 사항
 
 1.  **Terraform 배포 완료**: 테스트하려는 환경(예: `dev`)의 GCP 리소스가 `terraform apply`를 통해 배포되어 있어야 합니다.
 2.  **GCP 인증**: 로컬 환경에서 GCP 서비스에 접근할 수 있도록 `gcloud` CLI를 통해 인증해야 합니다.
@@ -159,7 +185,7 @@ Terraform 배포 시 생성되는 커스텀 대시보드에서 `loader`, `dispat
     gcloud auth application-default login
     ```
 
-#### 4.3.2. `.env` 파일 설정
+#### 4.4.2. `.env` 파일 설정
 
 `make setup`으로 생성된 `.env` 파일이 실제 GCP 리소스를 바라보도록 수정해야 합니다. **가장 중요한 것은 `FIRESTORE_EMULATOR_HOST` 변수를 주석 처리하거나 삭제하는 것입니다.**
 
@@ -186,7 +212,7 @@ WORKER_URL="https://dify-batch-processor-worker-....run.app" # 배포된 worker�
 # ...
 ```
 
-#### 4.3.3. 하이브리드 테스트 워크플로우
+#### 4.4.3. 하이브리드 테스트 워크플로우
 
 1.  **터미널 1: Worker 실행**
     로컬에서 `worker`를 실행하여 실제 Cloud Tasks 큐로부터 작업을 받을 준비를 합니다.
@@ -217,14 +243,14 @@ WORKER_URL="https://dify-batch-processor-worker-....run.app" # 배포된 worker�
     make run-poller
     ```
 
-#### 4.3.4. 중요: VPC 서비스 제어(VPC-SC) 환경에서의 제약
+#### 4.4.4. 중요: VPC 서비스 제어(VPC-SC) 환경에서의 제약
 
 > ⚠️ **경고**: 이 하이브리드 테스트 방식은 GCP 조직에 **VPC 서비스 제어(VPC Service Controls)**가 활성화된 경우, `CONSUMER_INVALID` 에러를 발생시키며 실패할 가능성이 매우 높습니다.
 
 -   **원인**: VPC-SC는 신뢰할 수 없는 네트워크(예: 개발자의 로컬 머신)에서 GCP 서비스 API로의 직접적인 호출을 보안 정책상 차단합니다.
 -   **해결 방안**: 이 문제를 해결하려면 보안 경계 **내부**에서 코드를 실행해야 합니다. GCP 프로젝트 내에 작은 GCE(Google Compute Engine) VM 인스턴스를 생성하고, 해당 VM에 접속하여 이 가이드의 `4.4.3` 단계를 수행하면 됩니다. 모든 API 호출이 GCP 내부 네트워크에서 발생하므로 VPC-SC 정책에 의해 차단되지 않습니다.
 
-### 4.4. 배포된 서비스 테스트 (End-to-End)
+### 4.5. 배포된 서비스 테스트 (End-to-End)
 
 GCP에 배포된 전체 파이프라인을 즉시 실행하여 테스트할 수 있습니다. 아래 명령어는 `loader`를 트리거하는 Cloud Scheduler 작업을 즉시 실행시킵니다.
 

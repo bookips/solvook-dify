@@ -1,7 +1,7 @@
 # Batch Processor: 플러그인 콜드 스타트 실패 자동 재시도
 
 - 작성일: 2026-11-20
-- 상태: **계획만 작성됨. 진행 여부는 추후 결정**
+- 상태: **구현 완료(브랜치 `feat/poller-transient-retry`). 운영 배포 전** — §6 배포 순서 참고
 - 대상: `dify-batch-processor` (poller, shared, loader), 운영 DB `batch_process_status`
 
 ## 1. 배경
@@ -72,7 +72,7 @@ Dify run 응답의 `error` 문자열에 아래 중 하나가 포함되면 재시
 
 ### 재시도 상한
 - 새 컬럼 `retry_count`로 횟수를 기록한다. 상한이 없으면 실패가 반복될 때 무한히 재투입된다.
-- 상한은 `MAX_TRANSIENT_RETRIES` 환경변수로 받는다. 기본값은 **2(제안)** 이다.
+- 상한은 `MAX_TRANSIENT_RETRIES` 환경변수로 받는다. 기본값은 **2** 이다. `0`이면 재시도하지 않는다.
 - 시트에서 다시 실행하면(loader가 FAILED 행을 PENDING으로 올리는 경우) `retry_count`를 0으로 초기화한다.
 
 ## 3. 변경 목록
@@ -100,7 +100,8 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
 ### 3.4 `loader/main.py`
 - `check_and_upsert_status` 호출 시 넘기는 `data`에 `retry_count: 0`을 추가한다.
 
-### 3.5 Terraform (선택)
+### 3.5 Terraform (선택) — **적용하지 않음**
+- 코드 기본값(2)을 그대로 쓰므로 terraform 변경 없이 배포한다. 상한을 바꿔야 할 때 아래를 추가한다.
 - `terraform/modules/dify_batch_processor`에서 poller 환경변수로 `MAX_TRANSIENT_RETRIES`를 넘긴다.
 - poller zip에는 이미 `shared/`가 포함되어 있어 utils 변경은 자동으로 반영된다.
 
@@ -150,10 +151,11 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
 롤백: poller를 이전 버전으로 재배포한다. 컬럼은 남겨 둬도 기존 코드에 영향이 없다.
 
 ## 7. 결정이 필요한 사항
-- [ ] **워크플로우를 처음부터 다시 돌려도 괜찮은지.** 실패 지점 앞의 노드는 이미 실행된 상태다. 두 워크플로우가 그 앞에서 webhook(`webhook_sender`)이나 외부 쓰기를 한다면 재시도 시 중복으로 발생한다. S3 `result.json` 덮어쓰기는 문제없다. Dify DSL에서 확인이 필요하다.
-- [ ] 재시도 상한 값 (제안: 2)
-- [ ] polling 요청 자체의 실패(Dify 5xx 등, 현재는 즉시 `FAILED`)도 이번 범위에 넣을지
-- [ ] `min_instance_count = 1`을 함께 적용할지 (재시도와 상호보완)
+2026-11-20 결정:
+- [x] **워크플로우를 처음부터 다시 돌려도 괜찮은지** → 괜찮다(사용자 확인). 재시도는 처음부터 다시 실행한다.
+- [x] 재시도 상한 값 → **2**
+- [x] polling 요청 자체의 실패(Dify 5xx 등) → **이번 범위에서 제외.** 지금처럼 즉시 `FAILED`.
+- [x] `min_instance_count = 1` 함께 적용 → **적용하지 않는다.** 현재 설정(0) 유지.
 
 ## 8. 범위 밖
 - worker 단계의 HTTP 실패 재시도 (Cloud Tasks 재시도 정책)

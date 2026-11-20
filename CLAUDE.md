@@ -26,7 +26,8 @@ Dify self-hosted(GCP Cloud Run) 인프라 Terraform과, Dify 워크플로우를 
 
 ## 알려진 장애: 콜드 스타트 직후 플러그인 미준비
 - `min_instance_count = 0`이라 0대에서 새로 뜨는 인스턴스는 약 90초 동안 플러그인이 준비되지 않는다. 플러그인을 동시 2개씩 순차로 기동하기 때문이다. 그런데 probe는 1초 만에 통과하므로 그 사이 들어온 요청이 `no available node, plugin runtime not found`로 실패한다.
-- 분석과 대응 계획: `docs/plans/2026-11-20-batch-poller-transient-retry.md`
+- 대응: batch processor poller가 이 에러로 실패한 run을 `PENDING`으로 되돌려 최대 `MAX_TRANSIENT_RETRIES`(기본 2)회 다시 실행한다. `min_instance_count`는 비용 때문에 0으로 유지하기로 했다.
+- 분석과 계획: `docs/plans/2026-11-20-batch-poller-transient-retry.md`
 
 ## 이미지와 레지스트리
 - Cloud Run은 amd64만 실행한다. Apple Silicon에서 받은 이미지는 arm64이므로, `docker manifest inspect`로 amd64 digest를 찾아 그 digest로 pull/push한다.
@@ -38,6 +39,7 @@ Dify self-hosted(GCP Cloud Run) 인프라 Terraform과, Dify 워크플로우를 
 ## dify-batch-processor
 - 구조: loader → dispatcher → Cloud Tasks → worker → poller. worker는 `workflow_started`만 받고 끝나며, 성공·실패 판정은 poller가 한다.
 - 상태 저장소는 **PostgreSQL `batch_process_status`** 테이블이다. README 일부와 `GEMINI.md`의 Firestore/Datastore 설명은 옛 내용이다. 함수명 `update_datastore` 등은 그 시절 이름이 남은 것이다.
-- `shared/utils.py`의 `_KNOWN_COLUMNS`와 `check_and_upsert_status`의 `known_cols`에 없는 키는 **에러 없이 버려진다.** 컬럼을 추가하면 두 목록과 실제 DB 스키마를 함께 바꿔야 한다.
+- `shared/utils.py`의 `_KNOWN_COLUMNS`와 `check_and_upsert_status`의 `known_cols`에 없는 키는 **에러 없이 버려진다.** 컬럼을 추가하면 두 목록과 실제 DB 스키마를 함께 바꿔야 한다. 테스트(`tests/test_status_columns.py`)가 `retry_count` 누락을 잡는다.
+- 테스트: `cd dify-batch-processor && poetry run pytest`. 함수마다 `config.py`가 따로 있어 `tests/conftest.py`의 `load_function`으로만 import한다.
 - 배포는 terraform `modules/dify_batch_processor`가 소스를 zip으로 묶어 Cloud Functions gen2로 올린다. 이 zip에 `shared/`가 포함되므로, 공용 코드를 바꾸면 해당 함수들을 모두 재배포해야 한다.
 - 워크플로우 ID와 커리큘럼·카테고리의 매핑은 `terraform.tfvars`의 `*_workflow_id` 값과 loader 설정에 있다.
