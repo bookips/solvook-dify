@@ -295,6 +295,7 @@ def test_stale_poller_snapshot_does_not_fail_a_newer_run(dispatcher, worker, pol
     worker_starts(worker, payload, "run-2")
 
     monkeypatch.setattr(poller.Config, "PROCESSING_TIMEOUT_MINUTES", 30)
+    monkeypatch.setattr(poller.Config, "HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID", WORKFLOW_ID)
     monkeypatch.setattr(
         poller, "datetime", _Clock(stale_snapshot[0].get("timestamp") + timedelta(minutes=31))
     )
@@ -302,6 +303,7 @@ def test_stale_poller_snapshot_does_not_fail_a_newer_run(dispatcher, worker, pol
     poller.get_entities_from_datastore = lambda *a, **k: stale_snapshot  # poller A resumes
     poll(poller, {})
 
+    poller.check_object_exists.assert_called_once()  # took the S3 path, not "unknown workflow"
     assert table.rows["j1"]["status"] == "PROCESSING"
     assert table.rows["j1"]["workflow_run_id"] == "run-2"
 

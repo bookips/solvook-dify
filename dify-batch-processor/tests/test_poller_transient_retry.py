@@ -216,6 +216,7 @@ GUARD_SCENARIOS = {
     "processing timeout, S3 missing": dict(minutes_old=31, s3=False),
     "processing timeout, S3 found": dict(minutes_old=31, s3=True),
     "no run id timeout": dict(minutes_old=16, run_id=None, s3=False),
+    "processing timeout, unknown workflow": dict(minutes_old=31, unknown_workflow=True),
 }
 
 
@@ -226,7 +227,8 @@ def test_every_poller_write_expects_the_snapshot_it_read(poller, monkeypatch, sc
     job = make_job("j1", workflow_run_id=spec.get("run_id", "run-1"), timestamp=snapshot_ts)
     monkeypatch.setattr(poller.Config, "PROCESSING_TIMEOUT_MINUTES", 30)
     monkeypatch.setattr(poller.Config, "PROCESSING_NO_RUNID_TIMEOUT_MINUTES", 15)
-    monkeypatch.setattr(poller.Config, "HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID", job.get("workflow_id"))
+    if not spec.get("unknown_workflow"):
+        monkeypatch.setattr(poller.Config, "HIGH_PASSAGE_ANALYSIS_WORKFLOW_ID", job.get("workflow_id"))
     poller.check_object_exists = MagicMock(return_value=spec.get("s3", False))
     poller.get_entities_from_datastore = MagicMock(return_value=[job])
     if spec.get("response") == "raise":
@@ -249,3 +251,18 @@ def test_skipped_conditional_write_is_not_an_error(poller):
         {"j1": dify_response("failed", PLUGIN_COLD_START_ERROR), "j2": dify_response("succeeded")},
     )
     assert poller.update_datastore.call_count == 2
+
+
+def test_every_update_datastore_call_in_poller_passes_expect():
+    """Static audit: a poller write added later without the snapshot guard fails here."""
+    import ast
+    from conftest import PACKAGE_ROOT
+
+    tree = ast.parse((PACKAGE_ROOT / "poller" / "main.py").read_text())
+    calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "update_datastore"
+    ]
+    assert calls, "expected update_datastore calls in poller/main.py"
+    unguarded = [c.lineno for c in calls if "expect" not in {k.arg for k in c.keywords}]
+    assert unguarded == [], f"update_datastore without expect= at poller/main.py lines {unguarded}"
