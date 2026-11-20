@@ -39,7 +39,7 @@ Dify self-hosted(GCP Cloud Run) 인프라 Terraform과, Dify 워크플로우를 
 ## dify-batch-processor
 - 구조: loader → dispatcher → Cloud Tasks → worker → poller. worker는 `workflow_started`만 받고 끝나며, 성공·실패 판정은 poller가 한다.
 - 상태 저장소는 **PostgreSQL `batch_process_status`** 테이블이다. README 일부와 `GEMINI.md`의 Firestore/Datastore 설명은 옛 내용이다. 함수명 `update_datastore` 등은 그 시절 이름이 남은 것이다.
-- `shared/utils.py`의 `_KNOWN_COLUMNS`와 `check_and_upsert_status`의 `known_cols`에 없는 키는 **에러 없이 버려진다.** 컬럼을 추가하면 두 목록과 실제 DB 스키마를 함께 바꿔야 한다. 테스트(`tests/test_status_columns.py`)가 `retry_count` 누락을 잡는다.
+- `shared/utils.py`의 `_KNOWN_COLUMNS`에 없는 키는 `update_datastore`·`check_and_upsert_status` 양쪽에서 **에러 없이 버려진다.** 컬럼을 추가하면 `_KNOWN_COLUMNS`와 실제 DB 스키마를 함께 바꿔야 한다(`check_and_upsert_status`가 쓰는 `_DATA_COLUMNS`는 여기서 파생된다).
 - 테스트: `cd dify-batch-processor && poetry run pytest`. 함수마다 `config.py`가 따로 있어 `tests/conftest.py`의 `load_function`으로만 import한다.
 - 배포는 terraform `modules/dify_batch_processor`가 소스를 zip으로 묶어 Cloud Functions gen2로 올린다. 이 zip에 `shared/`가 포함되므로, 공용 코드를 바꾸면 해당 함수들을 모두 재배포해야 한다.
 - 워크플로우 ID와 커리큘럼·카테고리의 매핑은 `terraform.tfvars`의 `*_workflow_id` 값과 loader 설정에 있다.
