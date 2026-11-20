@@ -7,6 +7,9 @@ class Config:
     DIFY_API_KEY_SECRET_ID = os.getenv("DIFY_API_KEY_SECRET_ID")
     PROCESSING_TIMEOUT_MINUTES = int(os.getenv("PROCESSING_TIMEOUT_MINUTES", 30))
     PROCESSING_NO_RUNID_TIMEOUT_MINUTES = int(os.getenv("PROCESSING_NO_RUNID_TIMEOUT_MINUTES", 15))
+    # How many times a run that failed with a transient plugin error is sent back to PENDING.
+    # 0 disables re-queuing.
+    MAX_TRANSIENT_RETRIES = int(os.getenv("MAX_TRANSIENT_RETRIES", 2))
     AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")

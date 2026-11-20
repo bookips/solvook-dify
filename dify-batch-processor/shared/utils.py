@@ -14,7 +14,7 @@ TABLE_NAME = "batch_process_status"
 # always handled). Any key in the `data` dict that matches a column name is written
 # directly; unknown keys are silently ignored.
 _KNOWN_COLUMNS = frozenset(
-    {"unique_id", "status", "workflow_id", "workflow_run_id", "data", "result", "message", "timestamp"}
+    {"unique_id", "status", "workflow_id", "workflow_run_id", "data", "result", "message", "timestamp", "retry_count"}
 )
 
 
@@ -74,7 +74,7 @@ def check_and_upsert_status(
         columns = ["unique_id", "status", "timestamp"]
         values: list = [unique_id, new_status, datetime.now(timezone.utc)]
 
-        known_cols = {"workflow_id", "workflow_run_id", "data", "result", "message"}
+        known_cols = {"workflow_id", "workflow_run_id", "data", "result", "message", "retry_count"}
         if data:
             for k, v in data.items():
                 if k in known_cols:
