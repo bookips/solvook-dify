@@ -154,6 +154,7 @@ ALTER TABLE batch_process_status ADD COLUMN retry_count INTEGER NOT NULL DEFAULT
      - **loader**: 모든 실행이 첫 행에서 `column retry_count does not exist`로 500이 난다. 시트의 어떤 행도 큐에 들어가지 않는다.
      - **poller**: `update_datastore`가 예외를 삼켜 행이 `PROCESSING`에 머물고, 30분 타임아웃 뒤 `FAILED`가 된다.
    - `migrate_datastore_to_postgres.py`로 스키마를 맞추지 않는다. `CREATE TABLE IF NOT EXISTS`라서 기존 테이블에는 아무 일도 하지 않고, Datastore 데이터를 다시 가져오는 스크립트다.
+   - 적용 후 조건부 쓰기 확인: proxy를 띄우고(`./scripts/cloud-sql-proxy.sh`) `dify-batch-processor/`에서 `DB_HOST=localhost DB_PORT=15432 poetry run python scripts/verify_conditional_write.py` 실행. `ALL CHECKS PASSED`, exit 0이어야 한다. 임시 테이블·읽기 전용 세션·롤백 안에서만 돌아서 실제 테이블에는 쓰지 않는다(ALTER 적용 전에 돌려도 된다).
 2. `terraform apply`로 재배포. 코드가 바뀐 것은 poller와 loader지만, 4개 함수(loader·dispatcher·worker·poller)의 zip에 모두 `shared/utils.py`가 들어가므로 네 함수가 모두 다시 배포된다.
 3. 4.3 확인
 
